@@ -1,0 +1,21 @@
+\begin{table}[h!]
+\footnotesize
+\caption{CASE: Do all navigation bar links work? It is expected that each link opens the correct
+page within main area, retaining the navigation bar.}
+\begin{tabular}{l||p{8cm}|p{2cm}p{4cm}}
+\hline
+{\bf Date} & {\bf Actual Output} & {\bf Passed?} & {\bf Tester} \\
+\hline
+Nov 18 & None of the links open any pages & No & Last name of Student A \\
+\hline
+Nov 18 & Home link doesn’t open, all others work as expected & No & Last name of Student A \\
+\hline
+Nov 19 & Everything now works as expected & Yes & Last name of Student B \\
+\hline
+Nov 20 & Home link opens, but now all others don’t & No & Last name of Student A \\
+\hline
+Nov 24 & Everything works again, issue was php missing ; & Yes & Last name of Student A \\
+\hline
+\hline
+\end{tabular}
+\end{table}
