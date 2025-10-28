@@ -1,0 +1,93 @@
+/* assets/styles.css - basic layout and consistent look-and-feel */
+:root {
+    --primary: #2b6cb0;
+    --accent: #f6ad55;
+    --bg: #fafafa;
+    --text: #222;
+    --muted: #666;
+}
+
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+.site-header {
+    background: var(--primary);
+    color: white;
+    padding: 1rem;
+    text-align: center;
+}
+.container {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    align-items: flex-start;
+    flex-direction: column;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Top navigation */
+.topnav {
+    background: #fff;
+    padding: .5rem 1rem;
+    border-bottom: 1px solid #eee;
+}
+
+/* Members grid */
+.members-grid {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+.member {
+    width: 150px;
+    text-align: center;
+    background: white;
+    padding: .5rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+}
+.member img {
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+    border-radius: 4px;
+}
+.login-box {
+    width: 320px;
+    background: white;
+    padding: 1rem;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+    margin-top: 1rem;
+}
+.login-box h2 { margin-top: 0; }
+.login-box label {
+    display: block;
+    margin-bottom: .5rem;
+}
+.login-box input[type="text"], .login-box input[type="password"], select {
+    width: 100%;
+    padding: .5rem;
+    margin-top: .25rem;
+    margin-bottom: .5rem;
+}
+.login-box button {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: .6rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.login-feedback { color: var(--muted); margin-top: .5rem; }
+
+/* General sections */
+section { margin-bottom: 1rem; background: white; padding: 1rem; border-radius:6px; border:1px solid #eee; }
+.charts-row { display:flex; gap: 1rem; flex-wrap:wrap; }
+canvas { background: #fff; border: 1px solid #f0f0f0; border-radius:4px; }
