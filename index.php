@@ -16,10 +16,14 @@ if (isset($_SESSION['Username']) && isset($_SESSION['Role'])) {
 // Replace these entries with your actual group member images and names.
 // Put member images in assets/images/
 $group_members = [
-    ['name' => 'Alice Smith', 'img' => 'assets/images/alice.jpg'],
-    ['name' => 'Bob Jones',   'img' => 'assets/images/bob.jpg'],
-    ['name' => 'Carol Lee',   'img' => 'assets/images/carol.jpg']
+    ['name' => 'Anthony Mendoza', 'img' => 'assets/images/alice.jpg'],
+    ['name' => 'Aytaj Aslanli',   'img' => 'assets/images/bob.jpg'],
+    ['name' => 'Elisa Gonzalez',   'img' => 'assets/images/bob.jpg'],
+    ['name' => 'Faisal Alkhouri',   'img' => 'assets/images/bob.jpg'],
+    ['name' => 'Mateusz Lisiecki',   'img' => 'assets/images/bob.jpg'],
+    ['name' => 'Zach Byington',   'img' => 'assets/images/carol.jpg']
 ];
+
 
 // Show any login error stored in session
 $login_error = $_SESSION['login_error'] ?? '';
