@@ -1,0 +1,27 @@
+-- Set variables first
+SET @company_id = 7;
+SET @start_date = '2020-01-01';
+SET @end_date   = '2025-12-31';
+
+SELECT
+    @company_id AS TargetCompanyID,
+    'Adjustment' AS TransactionType,
+    it.TransactionID,
+    NULL AS ShipmentID,
+    p.ProductName,
+    NULL AS SourceCompany,
+    NULL AS DestinationCompany,
+    'Adjustment' AS CompanyRole,
+    ia.AdjustmentDate AS TransactionDate,
+    NULL AS QuantityShipped,
+    NULL AS QuantityReceived,
+    ia.QuantityChange,
+    ia.Reason
+FROM InventoryTransaction it
+JOIN InventoryAdjustment ia ON ia.TransactionID = it.TransactionID
+JOIN Product p ON p.ProductID = ia.ProductID
+WHERE it.Type = 'Adjustment'
+  AND ia.CompanyID = @company_id
+  AND ia.AdjustmentDate BETWEEN @start_date AND @end_date
+
+ORDER BY TransactionType, TransactionDate;
