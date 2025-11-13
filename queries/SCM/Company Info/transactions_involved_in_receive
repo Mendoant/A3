@@ -1,0 +1,28 @@
+-- Set variables first
+SET @company_id = 7;
+SET @start_date = '2020-01-01';
+SET @end_date   = '2025-12-31';
+
+SELECT
+    @company_id AS TargetCompanyID,
+    'Receiving' AS TransactionType,
+    it.TransactionID,
+    r.ShipmentID,
+    p.ProductName,
+    src.CompanyName AS SourceCompany,
+    dest.CompanyName AS DestinationCompany,
+    'Receiver' AS CompanyRole,
+    r.ReceivedDate AS TransactionDate,
+    NULL AS QuantityShipped,
+    r.QuantityReceived,
+    NULL AS QuantityChange,
+    NULL AS Reason
+FROM InventoryTransaction it
+JOIN Receiving r ON r.TransactionID = it.TransactionID
+JOIN Shipping s ON s.ShipmentID = r.ShipmentID
+JOIN Product p ON p.ProductID = s.ProductID
+JOIN Company src ON src.CompanyID = s.SourceCompanyID
+JOIN Company dest ON dest.CompanyID = s.DestinationCompanyID
+WHERE it.Type = 'Receiving'
+  AND r.ReceiverCompanyID = @company_id
+  AND r.ReceivedDate BETWEEN @start_date AND @end_date
