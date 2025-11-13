@@ -35,9 +35,11 @@ CREATE TABLE Location (
     LocationID INT(5) AUTO_INCREMENT NOT NULL,
     CountryName VARCHAR(100) NOT NULL,
     ContinentName VARCHAR(50) NOT NULL,
+    City VARCHAR(100) NOT NULL,
     PRIMARY KEY (LocationID),
-    UNIQUE (CountryName)
+    UNIQUE KEY uniq_country_city (CountryName, City)
 ) ENGINE=InnoDB;
+
 
 CREATE TABLE Company (
     CompanyID INT(8) AUTO_INCREMENT NOT NULL,
