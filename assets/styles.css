@@ -1,93 +1,614 @@
-/* assets/styles.css - basic layout and consistent look-and-feel */
+/* Purdue Maximalist Design System */
+/* Black & Gold Color Scheme */
+
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600;700&display=swap');
+
+/* ============================================
+   ROOT VARIABLES
+   ============================================ */
 :root {
-    --primary: #2b6cb0;
-    --accent: #f6ad55;
-    --bg: #fafafa;
-    --text: #222;
-    --muted: #666;
+  --purdue-gold: #CFB991;
+  --purdue-gold-light: #f4e4c1;
+  --purdue-gold-dark: #b89968;
+  --purdue-black: #000000;
+  --purdue-gray-dark: #1a1a1a;
+  --purdue-gray: #2a2a2a;
+  --text-white: #ffffff;
+  --text-light: #e8e8e8;
+  --error-red: #ff6b6b;
+  
+  --font-heading: 'Orbitron', sans-serif;
+  --font-body: 'Inter', Arial, sans-serif;
+  
+  --transition-speed: 0.3s;
+  --border-radius: 8px;
+  --border-radius-large: 16px;
 }
 
-* { box-sizing: border-box; }
-body {
-    margin: 0;
-    font-family: "Segoe UI", Roboto, Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
+/* ============================================
+   GLOBAL RESET & BASE STYLES
+   ============================================ */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
-.site-header {
-    background: var(--primary);
-    color: white;
-    padding: 1rem;
-    text-align: center;
+
+body { 
+  font-family: var(--font-body);
+  margin: 0; 
+  padding: 0; 
+  background: linear-gradient(135deg, var(--purdue-black) 0%, var(--purdue-gray-dark) 50%, var(--purdue-black) 100%);
+  color: var(--text-white);
+  position: relative;
+  overflow-x: hidden;
+  min-height: 100vh;
 }
-.container {
-    display: flex;
-    gap: 1rem;
-    padding: 1rem;
-    align-items: flex-start;
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(circle at 20% 30%, rgba(207, 185, 145, 0.15) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(207, 185, 145, 0.1) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ============================================
+   LAYOUT
+   ============================================ */
+.container { 
+  width: 95%; 
+  max-width: 1400px; 
+  margin: 0 auto; 
+  padding: 40px 32px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================
+   HEADER
+   ============================================ */
+header { 
+  background: linear-gradient(135deg, var(--purdue-black) 0%, var(--purdue-gray) 100%);
+  padding: 28px 0; 
+  color: var(--purdue-gold);
+  border-bottom: 4px solid var(--purdue-gold);
+  box-shadow: 0 8px 32px rgba(207, 185, 145, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+header::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(207, 185, 145, 0.15) 0%, transparent 70%);
+  animation: pulse 8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.2); opacity: 0.8; }
+}
+
+header .container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 32px;
+}
+
+header h1 { 
+  font-family: var(--font-heading);
+  margin: 0; 
+  font-size: 2.8rem;
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--purdue-gold) 0%, var(--purdue-gold-light) 50%, var(--purdue-gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 0 30px rgba(207, 185, 145, 0.5);
+  letter-spacing: 2px;
+  position: relative;
+}
+
+/* ============================================
+   NAVIGATION
+   ============================================ */
+header nav,
+nav { 
+  display: flex;
+  gap: 32px;
+  align-items: center;
+}
+
+header nav a,
+nav a { 
+  color: var(--purdue-gold);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1.1rem;
+  padding: 12px 24px;
+  border: 2px solid var(--purdue-gold);
+  border-radius: var(--border-radius);
+  transition: all var(--transition-speed) ease;
+  position: relative;
+  overflow: hidden;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+header nav a::before,
+nav a::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(207, 185, 145, 0.3), transparent);
+  transition: left 0.5s ease;
+}
+
+header nav a:hover::before,
+nav a:hover::before {
+  left: 100%;
+}
+
+header nav a:hover,
+nav a:hover {
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+  box-shadow: 0 0 25px rgba(207, 185, 145, 0.6);
+  transform: translateY(-2px);
+}
+
+/* ============================================
+   TYPOGRAPHY
+   ============================================ */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  color: var(--purdue-gold);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+h2 {
+  font-size: 2.2rem;
+  margin-bottom: 24px;
+}
+
+h3 {
+  font-size: 1.8rem;
+  margin-bottom: 20px;
+}
+
+p {
+  line-height: 1.6;
+  margin-bottom: 16px;
+  color: var(--text-light);
+}
+
+/* ============================================
+   TABLES
+   ============================================ */
+table { 
+  width: 100%; 
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 32px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: var(--border-radius-large);
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(207, 185, 145, 0.2);
+  border: 2px solid rgba(207, 185, 145, 0.3);
+}
+
+th, td { 
+  padding: 20px 24px; 
+  border-bottom: 2px solid rgba(207, 185, 145, 0.2);
+  text-align: left;
+}
+
+th {
+  background: linear-gradient(135deg, var(--purdue-gray-dark) 0%, var(--purdue-black) 100%);
+  color: var(--purdue-gold);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 1.1rem;
+  border-bottom: 3px solid var(--purdue-gold);
+  position: relative;
+}
+
+th::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--purdue-gold), transparent);
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+td {
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text-light);
+  font-size: 1.05rem;
+}
+
+tr:hover td {
+  background: rgba(207, 185, 145, 0.1);
+  color: var(--purdue-gold);
+}
+
+/* ============================================
+   BUTTONS & INPUTS
+   ============================================ */
+button, 
+input[type=submit],
+input[type=button],
+.btn { 
+  padding: 14px 32px;
+  background: linear-gradient(135deg, var(--purdue-gold) 0%, var(--purdue-gold-dark) 100%);
+  color: var(--purdue-black);
+  border: none;
+  border-radius: var(--border-radius);
+  font-weight: 700;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: 0 6px 20px rgba(207, 185, 145, 0.4);
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-body);
+}
+
+button::before, 
+input[type=submit]::before,
+input[type=button]::before,
+.btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s ease, height 0.6s ease;
+}
+
+button:hover::before, 
+input[type=submit]:hover::before,
+input[type=button]:hover::before,
+.btn:hover::before {
+  width: 300px;
+  height: 300px;
+}
+
+button:hover, 
+input[type=submit]:hover,
+input[type=button]:hover,
+.btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 32px rgba(207, 185, 145, 0.6);
+}
+
+button:active, 
+input[type=submit]:active,
+input[type=button]:active,
+.btn:active {
+  transform: translateY(-1px);
+}
+
+button:disabled,
+input[type=submit]:disabled,
+input[type=button]:disabled,
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Secondary Button Style */
+.btn-secondary {
+  background: transparent;
+  color: var(--purdue-gold);
+  border: 2px solid var(--purdue-gold);
+}
+
+.btn-secondary:hover {
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+}
+
+/* ============================================
+   FORMS
+   ============================================ */
+.form-row { 
+  margin-bottom: 24px;
+}
+
+.form-row label {
+  display: block;
+  color: var(--purdue-gold);
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.form-row input, 
+.form-row select, 
+.form-row textarea,
+input[type=text],
+input[type=email],
+input[type=password],
+input[type=number],
+input[type=tel],
+input[type=url],
+select,
+textarea {
+  width: 100%;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  border-radius: var(--border-radius);
+  color: var(--text-white);
+  font-size: 1.05rem;
+  transition: all var(--transition-speed) ease;
+  font-family: var(--font-body);
+}
+
+.form-row input:focus, 
+.form-row select:focus, 
+.form-row textarea:focus,
+input[type=text]:focus,
+input[type=email]:focus,
+input[type=password]:focus,
+input[type=number]:focus,
+input[type=tel]:focus,
+input[type=url]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--purdue-gold);
+  box-shadow: 0 0 20px rgba(207, 185, 145, 0.3);
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.field-inline { 
+  display: flex; 
+  gap: 16px; 
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+small.error,
+.error { 
+  color: var(--error-red);
+  font-weight: 600;
+  text-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+}
+
+.content-section,
+.section {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 40px;
+  margin: 32px 0;
+  border-radius: var(--border-radius-large);
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  box-shadow: 0 12px 48px rgba(207, 185, 145, 0.2);
+  position: relative;
+}
+
+.accent-bar {
+  height: 4px;
+  background: linear-gradient(90deg, var(--purdue-gold), transparent);
+  margin: 24px 0;
+  border-radius: 2px;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-gold {
+  color: var(--purdue-gold);
+}
+
+.text-white {
+  color: var(--text-white);
+}
+
+/* Card Component */
+.card {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 32px;
+  border-radius: var(--border-radius-large);
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  box-shadow: 0 8px 32px rgba(207, 185, 145, 0.2);
+  transition: all var(--transition-speed) ease;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 16px 48px rgba(207, 185, 145, 0.3);
+  border-color: var(--purdue-gold);
+}
+
+/* Grid System */
+.grid {
+  display: grid;
+  gap: 32px;
+}
+
+.grid-2 {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.grid-3 {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.grid-4 {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+/* Flex Utilities */
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.flex-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.gap-sm {
+  gap: 8px;
+}
+
+.gap-md {
+  gap: 16px;
+}
+
+.gap-lg {
+  gap: 32px;
+}
+
+/* Spacing Utilities */
+.mt-sm { margin-top: 16px; }
+.mt-md { margin-top: 32px; }
+.mt-lg { margin-top: 48px; }
+
+.mb-sm { margin-bottom: 16px; }
+.mb-md { margin-bottom: 32px; }
+.mb-lg { margin-bottom: 48px; }
+
+.pt-sm { padding-top: 16px; }
+.pt-md { padding-top: 32px; }
+.pt-lg { padding-top: 48px; }
+
+.pb-sm { padding-bottom: 16px; }
+.pb-md { padding-bottom: 32px; }
+.pb-lg { padding-bottom: 48px; }
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+@media (max-width: 768px) {
+  header .container {
     flex-direction: column;
-    max-width: 1200px;
-    margin: 0 auto;
+    gap: 20px;
+    text-align: center;
+  }
+  
+  header h1 {
+    font-size: 2rem;
+  }
+  
+  header nav,
+  nav {
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+  
+  header nav a,
+  nav a {
+    width: 100%;
+    text-align: center;
+  }
+  
+  .container {
+    padding: 20px 16px;
+  }
+  
+  .content-section,
+  .section {
+    padding: 24px;
+  }
+  
+  table {
+    font-size: 0.9rem;
+  }
+  
+  th, td {
+    padding: 12px;
+  }
+  
+  .field-inline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .grid-2,
+  .grid-3,
+  .grid-4 {
+    grid-template-columns: 1fr;
+  }
 }
 
-/* Top navigation */
-.topnav {
-    background: #fff;
-    padding: .5rem 1rem;
-    border-bottom: 1px solid #eee;
-}
-
-/* Members grid */
+/* Make the members grid display horizontally */
 .members-grid {
     display: flex;
-    gap: 1rem;
     flex-wrap: wrap;
-    justify-content: flex-start;
+    gap: 20px;
+    justify-content: center;
+    margin-bottom: 30px;
 }
-.member {
-    width: 150px;
-    text-align: center;
-    background: white;
-    padding: .5rem;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-}
-.member img {
-    width: 100%;
-    height: 150px;
-    object-fit: cover;
-    border-radius: 4px;
-}
-.login-box {
-    width: 320px;
-    background: white;
-    padding: 1rem;
-    border-radius: 6px;
-    border: 1px solid #ddd;
-    margin-top: 1rem;
-}
-.login-box h2 { margin-top: 0; }
-.login-box label {
-    display: block;
-    margin-bottom: .5rem;
-}
-.login-box input[type="text"], .login-box input[type="password"], select {
-    width: 100%;
-    padding: .5rem;
-    margin-top: .25rem;
-    margin-bottom: .5rem;
-}
-.login-box button {
-    background: var(--primary);
-    color: white;
-    border: none;
-    padding: .6rem 1rem;
-    border-radius: 4px;
-    cursor: pointer;
-}
-.login-feedback { color: var(--muted); margin-top: .5rem; }
 
-/* General sections */
-section { margin-bottom: 1rem; background: white; padding: 1rem; border-radius:6px; border:1px solid #eee; }
-.charts-row { display:flex; gap: 1rem; flex-wrap:wrap; }
-canvas { background: #fff; border: 1px solid #f0f0f0; border-radius:4px; }
+.member {
+    margin: 0;
+    text-align: center;
+    flex: 0 0 auto; /* Prevent items from growing/shrinking */
+}
+
+.member img {
+    max-width: 150px;
+    max-height: 150px;
+    object-fit: cover;
+    display: block;
+    border-radius: 8px;
+}
+
+.member figcaption {
+    margin-top: 8px;
+    font-size: 14px;
+}
