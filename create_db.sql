@@ -25,7 +25,7 @@ CREATE TABLE User (
     UserID INT(8) AUTO_INCREMENT NOT NULL,
     FullName VARCHAR(100) NOT NULL,
     Username VARCHAR(50) NOT NULL UNIQUE,
-    Password VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
     Role ENUM('SupplyChainManager','SeniorManager') NOT NULL,
     PRIMARY KEY (UserID)
 ) ENGINE=InnoDB;
