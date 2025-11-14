@@ -13,11 +13,10 @@ if (isset($_SESSION['Username']) && isset($_SESSION['Role'])) {
     }
 }
 
-// Replace these entries with your actual group member images and names.
-// Put member images in assets/images/
+// member images in assets/images/
 $group_members = [
-    ['name' => 'Anthony Mendoza', 'img' => 'assets/images/alice.jpg'],
-    ['name' => 'Aytaj Aslanli',   'img' => 'assets/images/bob.jpg'],
+    ['name' => 'Anthony Mendoza', 'img' => 'assets/images/Anthony.jpg'],
+    ['name' => 'Aytaj Aslanli',   'img' => 'assets/images/WIN_20240919_14_47_10_Pro.jpg'],
     ['name' => 'Elisa Gonzalez',   'img' => 'assets/images/bob.jpg'],
     ['name' => 'Faisal Alkhouri',   'img' => 'assets/images/bob.jpg'],
     ['name' => 'Mateusz Lisiecki',   'img' => 'assets/images/bob.jpg'],
