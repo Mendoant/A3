@@ -1,0 +1,7 @@
+SET @CompanyName = 'Boyd PLC';
+
+SELECT 
+    TierLevel,
+    Type
+FROM Company
+WHERE CompanyName = @CompanyName;
