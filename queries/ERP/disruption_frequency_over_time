@@ -1,3 +1,7 @@
+-- Step 1: Set the company ID you want to query
+SET @company_id_selector = 12345;
+
+-- Step 2: Run the query using the variable
 SELECT
     c.CompanyName,
     c.CompanyID,
@@ -10,9 +14,9 @@ JOIN
 JOIN
     DisruptionEvent de ON ic.EventID = de.EventID
 WHERE
-    c.CompanyID = 12345 -- <-- This is the companyID selector
+    c.CompanyID = @company_id_selector -- Use the variable here
 GROUP BY
-    c.CompanyID,  -- Grouping by ID is faster
+    c.CompanyID,
     c.CompanyName,
     DisruptionMonth
 ORDER BY
