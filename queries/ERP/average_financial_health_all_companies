@@ -1,0 +1,17 @@
+SELECT
+    c.CompanyID,
+    c.CompanyName,
+    -- Use COALESCE to show 0.00 instead of NULL for companies
+    -- that have no financial reports yet.
+    COALESCE(ROUND(AVG(fr.HealthScore), 2), 0.00) AS AverageHealthScore
+FROM
+    Company c
+LEFT JOIN
+    -- Use LEFT JOIN to ensure all companies are included,
+    -- even if they have no matching financial reports.
+    FinancialReport fr ON c.CompanyID = fr.CompanyID
+GROUP BY
+    c.CompanyID,
+    c.CompanyName
+ORDER BY
+    c.CompanyID ASC;
