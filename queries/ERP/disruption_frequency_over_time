@@ -1,0 +1,19 @@
+SELECT
+    c.CompanyName,
+    c.CompanyID,
+    DATE_FORMAT(de.EventDate, '%Y-%m') AS DisruptionMonth,
+    COUNT(de.EventID) AS DisruptionCount
+FROM
+    Company c
+JOIN
+    ImpactsCompany ic ON c.CompanyID = ic.AffectedCompanyID
+JOIN
+    DisruptionEvent de ON ic.EventID = de.EventID
+WHERE
+    c.CompanyID = 12345 -- <-- This is the companyID selector
+GROUP BY
+    c.CompanyID,  -- Grouping by ID is faster
+    c.CompanyName,
+    DisruptionMonth
+ORDER BY
+    DisruptionMonth ASC;
