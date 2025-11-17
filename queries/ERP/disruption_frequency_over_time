@@ -1,11 +1,11 @@
 -- Step 1: Set the company ID you want to query
-SET @company_id_selector = 12345;
+SET @company_id_selector = 1;
 
 -- Step 2: Run the query using the variable
 SELECT
     c.CompanyName,
     c.CompanyID,
-    DATE_FORMAT(de.EventDate, '%Y-%m') AS DisruptionMonth,
+    DATE_FORMAT(de.EventDate, '%Y-%m-%d') AS DisruptionDate,
     COUNT(de.EventID) AS DisruptionCount
 FROM
     Company c
@@ -18,6 +18,6 @@ WHERE
 GROUP BY
     c.CompanyID,
     c.CompanyName,
-    DisruptionMonth
+    DisruptionDate
 ORDER BY
-    DisruptionMonth ASC;
+    DisruptionDate ASC;
