@@ -1,3 +1,5 @@
+SET @companyName = 'Davis PLC';
+
 SELECT
     d.CompanyName AS DistributorName,
     fromC.CompanyName AS FromCompany,
@@ -11,4 +13,4 @@ JOIN Company fromC
     ON fromC.CompanyID = ol.FromCompanyID
 JOIN Company toC
     ON toC.CompanyID = ol.ToCompanyID
-WHERE d.CompanyName = 'Davis PLC';
+WHERE d.CompanyName = @companyName;
