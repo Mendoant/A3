@@ -1,3 +1,5 @@
+SET @companyName = 'Chavez Ltd';
+
 SELECT 
     c.CompanyName AS TargetCompany,
     up.CompanyName AS UpstreamDependency,
@@ -11,4 +13,4 @@ LEFT JOIN DependsOn d2
     ON d2.UpstreamCompanyID = c.CompanyID
 LEFT JOIN Company down
     ON down.CompanyID = d2.DownstreamCompanyID
-WHERE c.CompanyName = 'Chavez Ltd';
+WHERE c.CompanyName = @companyName;
