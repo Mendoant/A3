@@ -1,5 +1,5 @@
--- Put the companies you care about here (by ID)
--- e.g. (1, 2, 5) or (101, 202)
+SET @companyID = '1';
+
 SELECT
     s.SourceCompanyID              AS CompanyID,
     c.CompanyName,
@@ -21,11 +21,11 @@ JOIN (
         SourceCompanyID,
         SUM(Quantity) AS TotalCompanyQuantity
     FROM Shipping
-    WHERE SourceCompanyID IN (1, 2, 5)   -- <-- user-defined companies here
+    WHERE SourceCompanyID = @companyID   -- <-- user-defined companies here
     GROUP BY SourceCompanyID
 ) t
     ON t.SourceCompanyID = s.SourceCompanyID
-WHERE s.SourceCompanyID IN (1, 2, 5)      -- <-- same list here
+WHERE s.SourceCompanyID = @companyID      -- <-- same list here
 GROUP BY
     s.SourceCompanyID,
     c.CompanyName,
