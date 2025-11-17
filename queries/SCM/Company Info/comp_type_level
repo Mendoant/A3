@@ -1,4 +1,4 @@
-SET @CompanyName = 'Boyd PLC';
+SET @CompanyName = "Boyd PLC";
 
 SELECT 
     TierLevel,
