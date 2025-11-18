@@ -19,13 +19,13 @@ if ($username === '' || $password === '') {
 }
 
 $pdo = getPDO();
-$sql = "SELECT UserID, FullName, Username, Password, Role FROM `User` WHERE Username = :username LIMIT 1";
+$sql = "SELECT UserID, FullName, Username, password_hash, Role FROM `User` WHERE Username = :username LIMIT 1";
 $stmt = $pdo->prepare($sql);
 $stmt->execute([':username' => $username]);
 $user = $stmt->fetch();
 
 if ($user) {
-    $stored = $user['Password'];
+    $stored = $user['password_hash']; 
     $ok = false;
     // Prefer password hashes (password_hash), but allow plaintext fallback if used
     if (password_needs_rehash($stored, PASSWORD_DEFAULT) || strlen($stored) >= 60) {
