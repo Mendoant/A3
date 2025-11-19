@@ -268,6 +268,7 @@ $inTransit = $stmt->fetchColumn();
         <a href="scm_kpis.php" class="active">KPIs</a>
         <a href="scm_disruptions.php">Disruptions</a>
         <a href="scm_transactions.php">Transactions</a>
+        <a href="scm_transaction_costs.php">Cost Analysis</a>
         <a href="scm_distributors.php">Distributors</a>
     </div>
 
