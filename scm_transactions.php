@@ -202,6 +202,7 @@ $companies = $companiesStmt->fetchAll(PDO::FETCH_COLUMN);
         <a href="scm_kpis.php">KPIs</a>
         <a href="scm_disruptions.php">Disruptions</a>
         <a href="scm_transactions.php" class="active">Transactions</a>
+        <a href="scm_transaction_costs.php">Cost Analysis</a>
         <a href="scm_distributors.php">Distributors</a>
     </div>
 
