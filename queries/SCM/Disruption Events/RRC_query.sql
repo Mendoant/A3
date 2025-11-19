@@ -1,3 +1,5 @@
+--RRC Query
+
 SELECT
     l.ContinentName AS Region,
     COUNT(DISTINCT ic.EventID) AS NumDisruptionsInRegion,
