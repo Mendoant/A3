@@ -338,7 +338,7 @@ $highImpactRate = round($hdrStats['HDR'] ?? 0, 1);
         <a href="scm_kpis.php">KPIs</a>
         <a href="scm_disruptions.php" class="active">Disruptions</a>
         <a href="scm_transactions.php">Transactions</a>
-        <a href="scm_transaction_costs.php">Transactions</a>
+        <a href="scm_transaction_costs.php">Cost Analysis</a>
         <a href="scm_distributors.php">Distributors</a>
     </div>
 
