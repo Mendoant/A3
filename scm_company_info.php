@@ -16,17 +16,26 @@ $dependencies = [];
 $products = [];
 $message = '';
 
-// Handle company search
-if (isset($_GET['search']) && !empty($_GET['search'])) {
-    $search = '%' . $_GET['search'] . '%';
+// Handle AJAX request for company list
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_companies') {
+    header('Content-Type: application/json');
+    $sql = "SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName";
+    $stmt = $pdo->query($sql);
+    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    echo json_encode($companies);
+    exit;
+}
+
+// Handle company selection
+if (isset($_GET['company_id']) && !empty($_GET['company_id'])) {
+    $companyId = $_GET['company_id'];
     $sql = "SELECT c.*, l.CountryName, l.ContinentName, l.City, m.FactoryCapacity
             FROM Company c
             JOIN Location l ON c.LocationID = l.LocationID
             LEFT JOIN Manufacturer m ON c.CompanyID = m.CompanyID
-            WHERE c.CompanyName LIKE :search
-            LIMIT 1";
+            WHERE c.CompanyID = :companyId";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([':search' => $search]);
+    $stmt->execute([':companyId' => $companyId]);
     $company = $stmt->fetch();
     
     if ($company) {
@@ -100,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_company'])) {
     if ($stmt->execute([':tierLevel' => $tierLevel, ':companyId' => $companyId])) {
         $message = "Company updated successfully!";
         // Reload company data
-        header("Location: scm_company_info.php?search=" . urlencode($_POST['company_name']));
+        header("Location: scm_company_info.php?company_id=" . $companyId);
         exit;
     } else {
         $message = "Error updating company.";
@@ -191,6 +200,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_company'])) {
             color: #4caf50;
             font-weight: bold;
         }
+        #company_select {
+            width: 100%;
+            padding: 10px;
+            font-size: 1rem;
+            border-radius: 5px;
+            border: 2px solid rgba(207, 185, 145, 0.5);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+        }
+        .loading {
+            color: var(--purdue-gold);
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -221,22 +243,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_company'])) {
             <div class="message"><?= htmlspecialchars($message) ?></div>
         <?php endif; ?>
 
-        <!-- Search Form -->
+        <!-- Search Form with Dropdown -->
         <div class="search-box">
-            <form method="GET" action="scm_company_info.php">
-                <div class="flex-between gap-md">
-                    <div style="flex: 1;">
-                        <label for="search">Search Company by Name:</label>
-                        <input type="text" 
-                               id="search" 
-                               name="search" 
-                               placeholder="Enter company name..."
-                               value="<?= htmlspecialchars($_GET['search'] ?? '') ?>"
-                               required>
-                    </div>
-                    <button type="submit" style="align-self: flex-end;">Search</button>
-                </div>
-            </form>
+            <label for="company_select">Select Company:</label>
+            <select id="company_select" name="company_select">
+                <option value="">-- Select a company --</option>
+            </select>
+            <p class="loading" id="loading_text">Loading companies...</p>
         </div>
 
         <?php if ($company): ?>
@@ -289,9 +302,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_company'])) {
                 <!-- Update Form -->
                 <div class="content-section" style="margin-top: 30px;">
                     <h3>Update Company Information</h3>
-                    <form method="POST" action="scm_company_info.php">
+                    <form method="POST" action="scm_company_info.php" id="update_form">
                         <input type="hidden" name="company_id" value="<?= $company['CompanyID'] ?>">
-                        <input type="hidden" name="company_name" value="<?= htmlspecialchars($company['CompanyName']) ?>">
                         
                         <div class="form-row">
                             <label for="tier_level">Tier Level:</label>
@@ -391,12 +403,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_company'])) {
                 <?php endif; ?>
 
             </div>
-        <?php elseif (isset($_GET['search'])): ?>
+        <?php elseif (isset($_GET['company_id'])): ?>
             <div class="content-section">
-                <p style="color: var(--error-red); font-size: 1.2rem;">❌ No company found with that name. Please try again.</p>
+                <p style="color: var(--error-red); font-size: 1.2rem;">❌ No company found with that ID. Please try again.</p>
             </div>
         <?php endif; ?>
 
     </div>
+
+    <script>
+        // Load companies on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCompanies();
+        });
+
+        function loadCompanies() {
+            const select = document.getElementById('company_select');
+            const loadingText = document.getElementById('loading_text');
+            
+            fetch('scm_company_info.php?ajax=get_companies')
+                .then(response => response.json())
+                .then(data => {
+                    // Clear loading options
+                    select.innerHTML = '<option value="">-- Select a company --</option>';
+                    
+                    // Add companies to dropdown
+                    data.forEach(company => {
+                        const option = document.createElement('option');
+                        option.value = company.CompanyID;
+                        option.textContent = company.CompanyName;
+                        
+                        // Pre-select if this company is currently displayed
+                        const urlParams = new URLSearchParams(window.location.search);
+                        if (urlParams.get('company_id') == company.CompanyID) {
+                            option.selected = true;
+                        }
+                        
+                        select.appendChild(option);
+                    });
+                    
+                    loadingText.style.display = 'none';
+                })
+                .catch(error => {
+                    console.error('Error loading companies:', error);
+                    loadingText.textContent = 'Error loading companies. Please refresh the page.';
+                    loadingText.style.color = 'var(--error-red)';
+                });
+        }
+
+        // Handle company selection
+        document.getElementById('company_select').addEventListener('change', function() {
+            if (this.value) {
+                window.location.href = 'scm_company_info.php?company_id=' + this.value;
+            }
+        });
+
+        // Refresh dropdown after form submission
+        document.getElementById('update_form')?.addEventListener('submit', function() {
+            // The form will redirect, but we set a flag to reload companies on return
+            sessionStorage.setItem('reloadCompanies', 'true');
+        });
+
+        // Check if we need to reload companies after update
+        if (sessionStorage.getItem('reloadCompanies') === 'true') {
+            sessionStorage.removeItem('reloadCompanies');
+            loadCompanies();
+        }
+    </script>
 </body>
 </html>
