@@ -14,18 +14,18 @@ if (isset($_SESSION['Username']) && isset($_SESSION['Role'])) {
 }
 
 // member images in assets/images/
-$group_members = [
-    ['name' => 'Anthony Mendoza', 'img' => 'assets/images/Anthony.jpg'],
-    ['name' => 'Aytaj Aslanli',   'img' => 'assets/images/Aytaj.jpg'],
-    ['name' => 'Elisa Gonzalez',   'img' => 'assets/images/Elisa.jpg'],
-    ['name' => 'Faisal Alkhouri',   'img' => 'assets/images/Faisal.jpg'],
-    ['name' => 'Mateusz Lisiecki',   'img' => 'assets/images/Mateusz.jpg'],
-    ['name' => 'Zach Byington',   'img' => 'assets/images/Zach.jpg']
-];
+$group_members = array(
+    array('name' => 'Anthony Mendoza', 'img' => 'assets/images/Anthony.jpg'),
+    array('name' => 'Aytaj Aslanli',   'img' => 'assets/images/Aytaj.jpg'),
+    array('name' => 'Elisa Gonzalez',   'img' => 'assets/images/Elisa.jpg'),
+    array('name' => 'Faisal Alkhouri',   'img' => 'assets/images/Faisal.jpg'),
+    array('name' => 'Mateusz Lisiecki',   'img' => 'assets/images/Mateusz.jpg'),
+    array('name' => 'Zach Byington',   'img' => 'assets/images/Zach.jpg')
+);
 
 
 // Show any login error stored in session
-$login_error = $_SESSION['login_error'] ?? '';
+$login_error = isset($_SESSION['login_error']) ? $_SESSION['login_error'] : '';
 unset($_SESSION['login_error']);
 ?>
 <!doctype html>
@@ -37,6 +37,7 @@ unset($_SESSION['login_error']);
     <meta name="viewport" content="width=device-width,initial-scale=1">
 </head>
 <body>
+    
 <header class="site-header">
     <h1>Group Project ERP / SCM</h1>
 </header>
@@ -45,8 +46,8 @@ unset($_SESSION['login_error']);
     <section class="members-grid" aria-label="Group members">
         <?php foreach ($group_members as $m): ?>
             <figure class="member">
-                <img src="<?= htmlspecialchars($m['img']) ?>" alt="<?= htmlspecialchars($m['name']) ?>">
-                <figcaption><?= htmlspecialchars($m['name']) ?></figcaption>
+                <img src="<?php echo htmlspecialchars($m['img']) ?>" alt="<?php echo htmlspecialchars($m['name']) ?>">
+                <figcaption><?php echo htmlspecialchars($m['name']) ?></figcaption>
             </figure>
         <?php endforeach; ?>
     </section>
@@ -64,7 +65,7 @@ unset($_SESSION['login_error']);
             </label>
             <button type="submit" name="action" value="login">login</button>
             <?php if ($login_error): ?>
-                <div class="login-feedback" id="loginFeedback"><?= htmlspecialchars($login_error) ?></div>
+                <div class="login-feedback" id="loginFeedback"><?php echo htmlspecialchars($login_error) ?></div>
             <?php else: ?>
                 <div class="login-feedback" id="loginFeedback"></div>
             <?php endif; ?>
