@@ -581,6 +581,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($_GET)) {
         <a href="scm_kpis.php">KPIs</a>
         <a href="scm_disruptions.php">Disruptions</a>
         <a href="scm_transactions.php">Transactions</a>
+        <a href="scm_transaction_costs.php">Cost Analysis</a>
         <a href="scm_distributors.php" style="background: var(--purdue-gold); color: var(--purdue-black);">Distributors</a>
     </div>
 
