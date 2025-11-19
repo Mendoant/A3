@@ -210,6 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_company'])) {
         <a href="scm_kpis.php">KPIs</a>
         <a href="scm_disruptions.php">Disruptions</a>
         <a href="scm_transactions.php">Transactions</a>
+        <a href="scm_transaction_costs.php">Cost Analysis</a>
         <a href="scm_distributors.php">Distributors</a>
     </div>
 
