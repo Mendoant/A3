@@ -16,11 +16,11 @@ if (isset($_SESSION['Username']) && isset($_SESSION['Role'])) {
 // member images in assets/images/
 $group_members = [
     ['name' => 'Anthony Mendoza', 'img' => 'assets/images/Anthony.jpg'],
-    ['name' => 'Aytaj Aslanli',   'img' => 'assets/images/WIN_20240919_14_47_10_Pro.jpg'],
-    ['name' => 'Elisa Gonzalez',   'img' => 'assets/images/bob.jpg'],
-    ['name' => 'Faisal Alkhouri',   'img' => 'assets/images/bob.jpg'],
-    ['name' => 'Mateusz Lisiecki',   'img' => 'assets/images/bob.jpg'],
-    ['name' => 'Zach Byington',   'img' => 'assets/images/carol.jpg']
+    ['name' => 'Aytaj Aslanli',   'img' => 'assets/images/Aytaj.jpg'],
+    ['name' => 'Elisa Gonzalez',   'img' => 'assets/images/Elisa.jpg'],
+    ['name' => 'Faisal Alkhouri',   'img' => 'assets/images/Faisal.jpg'],
+    ['name' => 'Mateusz Lisiecki',   'img' => 'assets/images/Mateusz.jpg'],
+    ['name' => 'Zach Byington',   'img' => 'assets/images/Zach.jpg']
 ];
 
 
