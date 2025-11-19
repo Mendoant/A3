@@ -303,6 +303,7 @@ $totalCompaniesAffected = array_sum(array_column($disruptions, 'CompanyCount'));
         <a href="scm_kpis.php">KPIs</a>
         <a href="scm_disruptions.php" class="active">Disruptions</a>
         <a href="scm_transactions.php">Transactions</a>
+        <a href="scm_transaction_costs.php">Cost Analysis</a>
         <a href="scm_distributors.php">Distributors</a>
     </div>
 
