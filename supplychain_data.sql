@@ -2652,7 +2652,7 @@ INSERT INTO ImpactsCompany (EventID, AffectedCompanyID, ImpactLevel) VALUES (14,
 INSERT INTO ImpactsCompany (EventID, AffectedCompanyID, ImpactLevel) VALUES (14,47,'Low');
 INSERT INTO ImpactsCompany (EventID, AffectedCompanyID, ImpactLevel) VALUES (14,19,'Medium');
 INSERT INTO ImpactsCompany (EventID, AffectedCompanyID, ImpactLevel) VALUES (14,14,'Low');
-INSERT INTO DisruptionEvent (EventID, EventDate, EventRecoveryDate, CategoryID) VALUES (15, '2025-10-22', '2025-11-01', 4);
+INSERT INTO DisruptionEvent (EventID, EventDate, EventRecoveryDate, CategoryID) VALUES (15, '2025-10-22', '2026-01-01', 4);
 INSERT INTO ImpactsCompany (EventID, AffectedCompanyID, ImpactLevel) VALUES (15,41,'Low');
 INSERT INTO ImpactsCompany (EventID, AffectedCompanyID, ImpactLevel) VALUES (15,45,'Low');
 INSERT INTO ImpactsCompany (EventID, AffectedCompanyID, ImpactLevel) VALUES (15,21,'Low');
