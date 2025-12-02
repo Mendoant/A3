@@ -1,5 +1,4 @@
 <?php
-
 // scm_kpis.php - Key Performance Indicators
 require_once 'config.php';
 requireLogin();
@@ -12,14 +11,14 @@ if (hasRole('SeniorManager')) {
 
 $pdo = getPDO();
 
-// Get filter parameters (PHP 5.4 compatible)
-$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-90 days')); // Last 90 days
-$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
-$companyFilter = isset($_GET['company_id']) ? $_GET['company_id'] : 'all';
+// Get filter parameters
+$startDate = $_GET['start_date'] ?? date('Y-m-d', strtotime('-90 days')); // Last 90 days
+$endDate = $_GET['end_date'] ?? date('Y-m-d');
+$companyFilter = $_GET['company_id'] ?? 'all';
 
 // Build WHERE clause
-$whereConditions = array("s.PromisedDate BETWEEN :startDate AND :endDate");
-$params = array(':startDate' => $startDate, ':endDate' => $endDate);
+$whereConditions = ["s.PromisedDate BETWEEN :startDate AND :endDate"];
+$params = [':startDate' => $startDate, ':endDate' => $endDate];
 
 if ($companyFilter !== 'all') {
     $whereConditions[] = "(s.SourceCompanyID = :companyId OR s.DestinationCompanyID = :companyId)";
@@ -38,8 +37,8 @@ $stmt = $pdo->prepare($onTimeSQL);
 $stmt->execute($params);
 $onTimeData = $stmt->fetch();
 
-$totalDelivered = isset($onTimeData['total_delivered']) ? $onTimeData['total_delivered'] : 0;
-$onTimeCount = isset($onTimeData['on_time_count']) ? $onTimeData['on_time_count'] : 0;
+$totalDelivered = $onTimeData['total_delivered'] ?? 0;
+$onTimeCount = $onTimeData['on_time_count'] ?? 0;
 $onTimeRate = $totalDelivered > 0 ? round(($onTimeCount / $totalDelivered) * 100, 2) : 0;
 
 // 2. Average Delay and Standard Deviation
@@ -54,10 +53,10 @@ $stmt = $pdo->prepare($delaySQL);
 $stmt->execute($params);
 $delayData = $stmt->fetch();
 
-$avgDelay = round(isset($delayData['avg_delay']) ? $delayData['avg_delay'] : 0, 2);
-$stdDelay = round(isset($delayData['std_delay']) ? $delayData['std_delay'] : 0, 2);
-$minDelay = isset($delayData['min_delay']) ? $delayData['min_delay'] : 0;
-$maxDelay = isset($delayData['max_delay']) ? $delayData['max_delay'] : 0;
+$avgDelay = round($delayData['avg_delay'] ?? 0, 2);
+$stdDelay = round($delayData['std_delay'] ?? 0, 2);
+$minDelay = $delayData['min_delay'] ?? 0;
+$maxDelay = $delayData['max_delay'] ?? 0;
 
 // 3. Financial Health Status - Recent Quarter
 $financialSQL = "SELECT 
