@@ -1,7 +1,10 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 
-// login.php - login handler that creates a session (adapted to create_db.sql User table)
+// login.php - login handler that creates a session (PHP 5.4 compatible with legacy hashing)
 require_once 'config.php';
+
 
 // Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -9,8 +12,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$username = trim($_POST['username'] ?? '');
-$password = $_POST['password'] ?? '';
+$username = isset($_POST['username']) ? trim($_POST['username']) : '';
+$password = isset($_POST['password']) ? $_POST['password'] : '';
 
 if ($username === '' || $password === '') {
     $_SESSION['login_error'] = 'Username and password required';
@@ -21,11 +24,18 @@ if ($username === '' || $password === '') {
 $pdo = getPDO();
 $sql = "SELECT UserID, FullName, Username, password_hash, Role FROM `User` WHERE Username = :username LIMIT 1";
 $stmt = $pdo->prepare($sql);
-$stmt->execute([':username' => $username]);
+$stmt->execute(array(':username' => $username));
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // Check if a user was found AND the submitted password matches the stored hash
-if ($user && password_verify($password, $user['password_hash'])) {
+// Using SHA256 hashing for PHP 5.4 compatibility
+$password_match = false;
+if ($user) {
+    $hashed_password = hash('sha256', $password);
+    $password_match = ($hashed_password === $user['password_hash']);
+}
+
+if ($user && $password_match) {
 
     // 1. Successful Login: Set up session variables
     session_regenerate_id(true);
@@ -36,12 +46,13 @@ if ($user && password_verify($password, $user['password_hash'])) {
 
     // 2. Redirect based on role
     if ($_SESSION['Role'] === 'SeniorManager') {
-        header('Location: dashboard_erp.php');
+        header('Location: erp/dashboard.php');
     } else {
-        header('Location: dashboard_scm.php');
+        header('Location: scm/dashboard.php');
     }
     exit;
 }
+
 // failed login
 $_SESSION['login_error'] = 'Invalid username or password';
 header('Location: index.php');
