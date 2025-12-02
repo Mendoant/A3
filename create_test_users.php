@@ -4,22 +4,38 @@ ini_set('display_errors', 1);
 
 require_once 'config.php';
 
+// ==========================================
+// COMPATIBILITY FIX FOR OLD PHP VERSIONS
+// ==========================================
+if (!function_exists('password_hash')) {
+    define('PASSWORD_DEFAULT', 1);
+    
+    function password_hash($password, $algo, $options = array()) {
+        // Generate a random salt "good enough" for legacy PHP
+        // (Note: Modern PHP handles this much better, but this works for class assignments)
+        $salt = substr(str_replace('+', '.', base64_encode(pack('N4', mt_rand(), mt_rand(), mt_rand(), mt_rand()))), 0, 22);
+        // Use Blowfish algorithm ($2y$ or $2a$)
+        return crypt($password, '$2a$10$' . $salt);
+    }
+}
+// ==========================================
+
 echo "<h1>Creating Test Users</h1>";
 
-$users = array(
-    array(
+$users = [
+    [
         'full_name' => 'Supply Chain Manager',
         'username' => 'scm_user',
         'password' => 'scm123',
         'role' => 'SupplyChainManager'
-    ),
-    array(
+    ],
+    [
         'full_name' => 'Senior Manager',
         'username' => 'sm_user',
         'password' => 'sm123',
         'role' => 'SeniorManager'
-    )
-);
+    ]
+];
 
 try {
     $pdo = getPDO();
@@ -28,24 +44,23 @@ try {
     echo "<h2>Creating Users:</h2><ul>";
     
     foreach ($users as $user) {
-        // Hash the password using SHA-256 (PHP 5.4 compatible)
-        $password_hash = hash('sha256', $user['password']);
+        // 1. Using the polyfill if needed, and saving to $Password
+        $Password = password_hash($user['password'], PASSWORD_DEFAULT);
         
         echo "<li>Attempting to create: <strong>{$user['username']}</strong><br>";
         echo "Password (plaintext): {$user['password']}<br>";
-        echo "Password (hashed): " . substr($password_hash, 0, 40) . "...<br>";
+        echo "Password (hashed): " . substr($Password, 0, 40) . "...<br>";
         
-        // NOTE: Column name is 'password_hash' (lowercase with underscore)
-        $sql = "INSERT INTO `User` (FullName, Username, password_hash, Role) VALUES (?, ?, ?, ?)";
+        $sql = "INSERT INTO `User` (FullName, Username, Password, Role) VALUES (?, ?, ?, ?)";
         $stmt = $pdo->prepare($sql);
         
         try {
-            $stmt->execute(array(
+            $stmt->execute([
                 $user['full_name'],
                 $user['username'],
-                $password_hash,
+                $Password, // Inserting the hashed password
                 $user['role']
-            ));
+            ]);
             echo "<span style='color:green;font-weight:bold;'>✓ SUCCESS!</span></li>";
         } catch (PDOException $e) {
             if ($e->getCode() == 23000) {
