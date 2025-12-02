@@ -6,20 +6,20 @@ require_once 'config.php';
 
 echo "<h1>Creating Test Users</h1>";
 
-$users = [
-    [
+$users = array(
+    array(
         'full_name' => 'Supply Chain Manager',
         'username' => 'scm_user',
         'password' => 'scm123',
         'role' => 'SupplyChainManager'
-    ],
-    [
+    ),
+    array(
         'full_name' => 'Senior Manager',
         'username' => 'sm_user',
         'password' => 'sm123',
         'role' => 'SeniorManager'
-    ]
-];
+    )
+);
 
 try {
     $pdo = getPDO();
@@ -28,23 +28,24 @@ try {
     echo "<h2>Creating Users:</h2><ul>";
     
     foreach ($users as $user) {
-        // Hash the password properly
-        $password_hash = password_hash($user['password'], PASSWORD_DEFAULT);
+        // Hash the password using SHA-256 (PHP 5.4 compatible)
+        $password_hash = hash('sha256', $user['password']);
         
         echo "<li>Attempting to create: <strong>{$user['username']}</strong><br>";
         echo "Password (plaintext): {$user['password']}<br>";
         echo "Password (hashed): " . substr($password_hash, 0, 40) . "...<br>";
         
+        // NOTE: Column name is 'password_hash' (lowercase with underscore)
         $sql = "INSERT INTO `User` (FullName, Username, password_hash, Role) VALUES (?, ?, ?, ?)";
         $stmt = $pdo->prepare($sql);
         
         try {
-            $stmt->execute([
+            $stmt->execute(array(
                 $user['full_name'],
                 $user['username'],
                 $password_hash,
                 $user['role']
-            ]);
+            ));
             echo "<span style='color:green;font-weight:bold;'>✓ SUCCESS!</span></li>";
         } catch (PDOException $e) {
             if ($e->getCode() == 23000) {
