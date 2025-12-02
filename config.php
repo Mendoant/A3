@@ -6,9 +6,9 @@ date_default_timezone_set('America/Indiana/Indianapolis');
 
 // Edit these constants to match your MySQL host/database/user/password
 define('DB_HOST', 'mydb.ics.purdue.edu');
-define('DB_NAME', 'zbyingto'); // replace with your DB name
-define('DB_USER', 'zbyingto');       // replace with your DB user
-define('DB_PASS', 'Thrawnenjoyer!');   // replace with your DB password
+define('DB_NAME', 'g1151917'); // replace with your DB name
+define('DB_USER', 'g1151917');       // replace with your DB user
+define('DB_PASS', '7nuaSuUy');   // replace with your DB password
 
 // PDO connection helper
 function getPDO() {
