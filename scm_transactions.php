@@ -11,16 +11,16 @@ if (hasRole('SeniorManager')) {
 
 $pdo = getPDO();
 
-// Get filter parameters (PHP 5.4 compatible)
-$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-01'); // First day of current month
-$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d'); // Today
-$companyFilter = isset($_GET['company']) ? $_GET['company'] : '';
-$transactionType = isset($_GET['type']) ? $_GET['type'] : 'all';
-$statusFilter = isset($_GET['status']) ? $_GET['status'] : 'all';
+// Get filter parameters
+$startDate = $_GET['start_date'] ?? date('Y-m-01'); // First day of current month
+$endDate = $_GET['end_date'] ?? date('Y-m-d'); // Today
+$companyFilter = $_GET['company'] ?? '';
+$transactionType = $_GET['type'] ?? 'all';
+$statusFilter = $_GET['status'] ?? 'all';
 
 // Build the query based on filters
-$whereConditions = array();
-$params = array();
+$whereConditions = [];
+$params = [];
 
 // Date range filter
 $whereConditions[] = "s.PromisedDate BETWEEN :startDate AND :endDate";
@@ -71,17 +71,11 @@ if ($statusFilter !== 'all') {
     });
 }
 
-// Calculate summary statistics (PHP 5.4 compatible - no arrow functions)
+// Calculate summary statistics
 $totalShipments = count($shipments);
-$inTransit = count(array_filter($shipments, function($s) { 
-    return $s['Status'] === 'In Transit'; 
-}));
-$onTime = count(array_filter($shipments, function($s) { 
-    return $s['Status'] === 'On Time'; 
-}));
-$delayed = count(array_filter($shipments, function($s) { 
-    return $s['Status'] === 'Delayed'; 
-}));
+$inTransit = count(array_filter($shipments, fn($s) => $s['Status'] === 'In Transit'));
+$onTime = count(array_filter($shipments, fn($s) => $s['Status'] === 'On Time'));
+$delayed = count(array_filter($shipments, fn($s) => $s['Status'] === 'Delayed'));
 $onTimeRate = $totalShipments > 0 ? round(($onTime / ($onTime + $delayed)) * 100, 1) : 0;
 
 // Get all companies for dropdown

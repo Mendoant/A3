@@ -11,16 +11,16 @@ if (hasRole('SeniorManager')) {
 
 $pdo = getPDO();
 
-// Get filter parameters (PHP 5.4 compatible)
-$companyFilter = isset($_GET['company']) ? $_GET['company'] : 'all';
-$regionFilter = isset($_GET['region']) ? $_GET['region'] : 'all';
-$tierFilter = isset($_GET['tier']) ? $_GET['tier'] : 'all';
-$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-01-01'); // Start of current year
-$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d'); // Today
+// Get filter parameters
+$companyFilter = $_GET['company'] ?? 'all';
+$regionFilter = $_GET['region'] ?? 'all';
+$tierFilter = $_GET['tier'] ?? 'all';
+$startDate = $_GET['start_date'] ?? date('Y-01-01'); // Start of current year
+$endDate = $_GET['end_date'] ?? date('Y-m-d'); // Today
 
 // Build WHERE conditions for filters
-$whereConditions = array("de.EventDate BETWEEN :startDate AND :endDate");
-$params = array(':startDate' => $startDate, ':endDate' => $endDate);
+$whereConditions = ["de.EventDate BETWEEN :startDate AND :endDate"];
+$params = [':startDate' => $startDate, ':endDate' => $endDate];
 
 if ($companyFilter !== 'all') {
     $whereConditions[] = "c.CompanyID = :companyId";
@@ -134,13 +134,13 @@ $totalDowntime = $tdStmt->fetchAll();
 
 // 5. Regional Risk Concentration (RRC)
 // Build subquery WHERE clause with de2 alias
-$whereConditionsSubquery = array("de2.EventDate BETWEEN :startDate2 AND :endDate2");
-$rrcParams = array(
+$whereConditionsSubquery = ["de2.EventDate BETWEEN :startDate2 AND :endDate2"];
+$rrcParams = [
     ':startDate' => $startDate, 
     ':endDate' => $endDate,
     ':startDate2' => $startDate, 
     ':endDate2' => $endDate
-);
+];
 
 if ($companyFilter !== 'all') {
     $whereConditionsSubquery[] = "c2.CompanyID = :companyId2";
@@ -212,10 +212,10 @@ $regionsSql = "SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentNam
 $regionsStmt = $pdo->query($regionsSql);
 $regions = $regionsStmt->fetchAll(PDO::FETCH_COLUMN);
 
-// Calculate summary metrics (PHP 5.4 compatible)
-$totalDisruptions = isset($hdrStats['TotalDisruptions']) ? $hdrStats['TotalDisruptions'] : 0;
-$avgRecoveryTime = round(isset($artStats['AvgRecoveryTime']) ? $artStats['AvgRecoveryTime'] : 0, 1);
-$highImpactRate = round(isset($hdrStats['HDR']) ? $hdrStats['HDR'] : 0, 1);
+// Calculate summary metrics
+$totalDisruptions = $hdrStats['TotalDisruptions'] ?? 0;
+$avgRecoveryTime = round($artStats['AvgRecoveryTime'] ?? 0, 1);
+$highImpactRate = round($hdrStats['HDR'] ?? 0, 1);
 ?>
 <!DOCTYPE html>
 <html lang="en">
