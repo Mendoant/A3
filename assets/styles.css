@@ -26,7 +26,7 @@
 }
 
 /* ============================================
-   GLOBAL RESET & BASE STYLES
+   GLOBAL RESET & BASE STYLES - STRONGER FIX
    ============================================ */
 * {
   margin: 0;
@@ -34,15 +34,38 @@
   box-sizing: border-box;
 }
 
+/* SUPER AGGRESSIVE FIX: Force black everywhere */
+html {
+  background: #000000 !important;
+  background-color: #000000 !important;
+  min-height: 100%;
+  height: 100%;
+}
+
 body { 
   font-family: var(--font-body);
-  margin: 0; 
-  padding: 0; 
-  background: linear-gradient(135deg, var(--purdue-black) 0%, var(--purdue-gray-dark) 50%, var(--purdue-black) 100%);
+  margin: 0 !important; 
+  padding: 0 !important; 
+  background: #000000 !important;
+  background-color: #000000 !important;
   color: var(--text-white);
   position: relative;
   overflow-x: hidden;
   min-height: 100vh;
+  height: auto;
+}
+
+/* Add gradient overlay as a separate layer */
+body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.95) 0%, rgba(26, 26, 26, 0.95) 50%, rgba(0, 0, 0, 0.95) 100%);
+  pointer-events: none;
+  z-index: -1;
 }
 
 body::before {
@@ -56,9 +79,8 @@ body::before {
     radial-gradient(circle at 20% 30%, rgba(207, 185, 145, 0.15) 0%, transparent 50%),
     radial-gradient(circle at 80% 70%, rgba(207, 185, 145, 0.1) 0%, transparent 50%);
   pointer-events: none;
-  z-index: 0;
+  z-index: -1;
 }
-
 /* ============================================
    LAYOUT
    ============================================ */
@@ -170,6 +192,33 @@ nav a:hover {
   color: var(--purdue-black);
   box-shadow: 0 0 25px rgba(207, 185, 145, 0.6);
   transform: translateY(-2px);
+}
+
+/* Active tab styling */
+header nav a.active,
+nav a.active {
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+}
+
+/* Logout Button - Red styling */
+header nav a[href="logout.php"],
+nav a[href="logout.php"],
+header nav a[href="../logout.php"],
+nav a[href="../logout.php"] {
+  background: #dc3545;
+  color: white;
+  border-color: #dc3545;
+}
+
+header nav a[href="logout.php"]:hover,
+nav a[href="logout.php"]:hover,
+header nav a[href="../logout.php"]:hover,
+nav a[href="../logout.php"]:hover {
+  background: #c82333;
+  color: white;
+  border-color: #c82333;
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
 }
 
 /* ============================================

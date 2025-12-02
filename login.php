@@ -22,7 +22,7 @@ if ($username === '' || $password === '') {
 }
 
 $pdo = getPDO();
-$sql = "SELECT UserID, FullName, Username, Password, Role FROM `User` WHERE Username = :username LIMIT 1";
+$sql = "SELECT UserID, FullName, Username, password_hash, Role FROM `User` WHERE Username = :username LIMIT 1";
 $stmt = $pdo->prepare($sql);
 $stmt->execute(array(':username' => $username));
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -32,7 +32,7 @@ $user = $stmt->fetch(PDO::FETCH_ASSOC);
 $password_match = false;
 if ($user) {
     $hashed_password = hash('sha256', $password);
-    $password_match = ($hashed_password === $user['Password']);
+    $password_match = ($hashed_password === $user['password_hash']);
 }
 
 if ($user && $password_match) {
@@ -46,9 +46,9 @@ if ($user && $password_match) {
 
     // 2. Redirect based on role
     if ($_SESSION['Role'] === 'SeniorManager') {
-        header('Location: dashboard_erp.php');
+        header('Location: erp/dashboard.php');
     } else {
-        header('Location: dashboard_scm.php');
+        header('Location: scm/dashboard.php');
     }
     exit;
 }
