@@ -29,21 +29,20 @@ try {
     
     foreach ($users as $user) {
         // Hash the password using SHA-256 (PHP 5.4 compatible)
-        $password_hash = hash('sha256', $user['password']);
+        $Password = hash('sha256', $user['password']);
         
         echo "<li>Attempting to create: <strong>{$user['username']}</strong><br>";
         echo "Password (plaintext): {$user['password']}<br>";
-        echo "Password (hashed): " . substr($password_hash, 0, 40) . "...<br>";
+        echo "Password (hashed): " . substr($Password, 0, 40) . "...<br>";
         
-        // NOTE: Column name is 'password_hash' (lowercase with underscore)
-        $sql = "INSERT INTO `User` (FullName, Username, password_hash, Role) VALUES (?, ?, ?, ?)";
+        $sql = "INSERT INTO `User` (FullName, Username, Password, Role) VALUES (?, ?, ?, ?)";
         $stmt = $pdo->prepare($sql);
         
         try {
             $stmt->execute(array(
                 $user['full_name'],
                 $user['username'],
-                $password_hash,
+                $Password,
                 $user['role']
             ));
             echo "<span style='color:green;font-weight:bold;'>✓ SUCCESS!</span></li>";
