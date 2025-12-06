@@ -115,7 +115,6 @@ if (hasRole('SeniorManager')) {
         <div class="dashboard-grid">
             <!-- Companies -->
             <a href="companies.php" class="dashboard-card">
-                <span class="icon">🏢</span>
                 <h3>Company Management</h3>
                 <p>View and manage company information, search companies, update details, and analyze company performance metrics.</p>
                 <span class="btn-link">View Companies →</span>
@@ -123,7 +122,6 @@ if (hasRole('SeniorManager')) {
 
             <!-- KPIs -->
             <a href="kpis.php" class="dashboard-card">
-                <span class="icon">📊</span>
                 <h3>Key Performance Indicators</h3>
                 <p>Track on-time delivery rates, average recovery time, disruption metrics, and supply chain health scores.</p>
                 <span class="btn-link">View KPIs →</span>
@@ -131,7 +129,6 @@ if (hasRole('SeniorManager')) {
 
             <!-- Disruptions -->
             <a href="disruptions.php" class="dashboard-card">
-                <span class="icon">⚠️</span>
                 <h3>Disruption Analysis</h3>
                 <p>Analyze disruption frequency, recovery times, regional risk, and severity distribution across the supply chain.</p>
                 <span class="btn-link">View Disruptions →</span>
@@ -139,7 +136,6 @@ if (hasRole('SeniorManager')) {
 
             <!-- Transactions -->
             <a href="transactions.php" class="dashboard-card">
-                <span class="icon">📦</span>
                 <h3>Transaction Management</h3>
                 <p>Monitor shipments, track delivery status, analyze delays, and review transaction details by company and date.</p>
                 <span class="btn-link">View Transactions →</span>
@@ -147,7 +143,6 @@ if (hasRole('SeniorManager')) {
 
             <!-- Cost Analysis -->
             <a href="transaction_costs.php" class="dashboard-card">
-                <span class="icon">💰</span>
                 <h3>Cost Analysis</h3>
                 <p>Review shipping costs, delay penalties, cost trends, and analyze expenses by product category and time period.</p>
                 <span class="btn-link">View Costs →</span>
@@ -155,7 +150,6 @@ if (hasRole('SeniorManager')) {
 
             <!-- Distributors -->
             <a href="distributors.php" class="dashboard-card">
-                <span class="icon">🚚</span>
                 <h3>Distributor Performance</h3>
                 <p>Track distributor rankings, on-time rates, shipment volumes, and disruption exposure across logistics partners.</p>
                 <span class="btn-link">View Distributors →</span>
