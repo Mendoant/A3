@@ -218,7 +218,7 @@ $currentDisruptions = $disruptionStmt->fetchAll();
                 <span>ACTIVE DISRUPTIONS</span>
                 <span class="disruption-count"><?= count($currentDisruptions) ?> Active</span>
                 <span style="font-size: 0.85rem; font-weight: normal; margin-left: auto;">
-                    Hover to pause • <a href="scm_disruptions.php" style="color: #FFD700; text-decoration: underline;">View Details</a>
+                    Hover to pause • <a href="disruptions.php" style="color: #FFD700; text-decoration: underline;">View Details</a>
                 </span>
             </div>
 
