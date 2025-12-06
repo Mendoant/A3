@@ -8,6 +8,33 @@ if (hasRole('SeniorManager')) {
     header('Location: ../erp/dashboard.php');
     exit;
 }
+
+$pdo = getPDO();
+
+// Get current disruptions
+$disruptionSql = "SELECT 
+    de.EventID,
+    de.EventDate,
+    de.EventRecoveryDate,
+    dc.CategoryName,
+    dc.Description as CategoryDescription,
+    GROUP_CONCAT(DISTINCT c.CompanyName ORDER BY c.CompanyName SEPARATOR ', ') as AffectedCompanies,
+    COUNT(DISTINCT ic.AffectedCompanyID) as CompanyCount,
+    DATEDIFF(CURDATE(), de.EventDate) as DaysSinceStart,
+    MAX(ic.ImpactLevel) as MaxImpact
+FROM DisruptionEvent de
+JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
+JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+WHERE de.EventRecoveryDate IS NULL 
+   OR de.EventRecoveryDate >= CURDATE()
+GROUP BY de.EventID, de.EventDate, de.EventRecoveryDate, dc.CategoryName, dc.Description
+ORDER BY de.EventDate DESC
+LIMIT 10";
+
+$disruptionStmt = $pdo->prepare($disruptionSql);
+$disruptionStmt->execute();
+$currentDisruptions = $disruptionStmt->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -31,7 +58,7 @@ if (hasRole('SeniorManager')) {
             box-shadow: 0 8px 32px rgba(207, 185, 145, 0.2);
             transition: all 0.3s ease;
             text-decoration: none;
-            display: flex;
+            display: block;
             flex-direction: column;
             cursor: pointer;
         }
@@ -89,6 +116,85 @@ if (hasRole('SeniorManager')) {
         .welcome-section h2 {
             margin-top: 0;
         }
+
+        .disruption-banner-container {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 0;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 4px 20px rgba(220, 53, 69, 0.5);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        .disruption-banner-header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px 20px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        .disruption-banner-header .icon {
+            font-size: 1.5rem;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
+        .disruption-banner-scroll {
+            overflow: hidden;
+            position: relative;
+            height: 60px;
+            display: flex;
+            align-items: center;
+        }
+        .disruption-banner-content {
+            display: flex;
+            gap: 60px;
+            animation: scroll-left 30s linear infinite;
+            white-space: nowrap;
+            padding: 0 20px;
+        }
+        .disruption-banner-content:hover {
+            animation-play-state: paused;
+        }
+        @keyframes scroll-left {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .disruption-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 15px;
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .disruption-item strong {
+            color: #FFD700;
+        }
+        .disruption-item .badge {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        .impact-high { background: #ff4444 !important; }
+        .impact-medium { background: #ff9800 !important; }
+        .impact-low { background: #4caf50 !important; }
+        .disruption-count {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -102,7 +208,61 @@ if (hasRole('SeniorManager')) {
         </div>
     </header>
 
+
+    
     <div class="container">
+    <?php if (!empty($currentDisruptions)): ?>
+        <div class="disruption-banner-container">
+            <div class="disruption-banner-header">
+                <span class="icon">⚠️</span>
+                <span>ACTIVE DISRUPTIONS</span>
+                <span class="disruption-count"><?= count($currentDisruptions) ?> Active</span>
+                <span style="font-size: 0.85rem; font-weight: normal; margin-left: auto;">
+                    Hover to pause • <a href="scm_disruptions.php" style="color: #FFD700; text-decoration: underline;">View Details</a>
+                </span>
+            </div>
+
+            <div class="disruption-banner-scroll">
+                <div class="disruption-banner-content">
+                    <?php foreach ($currentDisruptions as $disruption): ?>
+                        <div class="disruption-item">
+                            <strong><?= htmlspecialchars($disruption['CategoryName']) ?></strong>
+                            <span>•</span>
+                            <span><?= htmlspecialchars($disruption['CompanyCount']) ?> companies affected</span>
+                            <span>•</span>
+                            <span class="badge impact-<?= strtolower($disruption['MaxImpact']) ?>">
+                                <?= htmlspecialchars($disruption['MaxImpact']) ?> Impact
+                            </span>
+                            <span>•</span>
+                            <span><?= htmlspecialchars($disruption['DaysSinceStart']) ?> days ongoing</span>
+                            <?php if ($disruption['CompanyCount'] <= 3): ?>
+                                <span>•</span>
+                                <span style="font-size: 0.9rem;"><?= htmlspecialchars($disruption['AffectedCompanies']) ?></span>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+
+                    <?php foreach ($currentDisruptions as $disruption): ?>
+                        <div class="disruption-item">
+                            <strong><?= htmlspecialchars($disruption['CategoryName']) ?></strong>
+                            <span>•</span>
+                            <span><?= htmlspecialchars($disruption['CompanyCount']) ?> companies affected</span>
+                            <span>•</span>
+                            <span class="badge impact-<?= strtolower($disruption['MaxImpact']) ?>">
+                                <?= htmlspecialchars($disruption['MaxImpact']) ?> Impact
+                            </span>
+                            <span>•</span>
+                            <span><?= htmlspecialchars($disruption['DaysSinceStart']) ?> days ongoing</span>
+                            <?php if ($disruption['CompanyCount'] <= 3): ?>
+                                <span>•</span>
+                                <span style="font-size: 0.9rem;"><?= htmlspecialchars($disruption['AffectedCompanies']) ?></span>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
         <div class="welcome-section">
             <h2>Welcome to Supply Chain Management</h2>
             <p><strong>User:</strong> <?= htmlspecialchars($_SESSION['FullName']) ?></p>
