@@ -107,6 +107,8 @@ if (hasRole('SeniorManager')) {
             <h2>Welcome to Supply Chain Management</h2>
             <p><strong>User:</strong> <?= htmlspecialchars($_SESSION['FullName']) ?></p>
             <p><strong>Role:</strong> <?= htmlspecialchars($_SESSION['Role']) ?></p>
+            <p><strong>User ID:</strong> <?php echo htmlspecialchars($_SESSION['UserID']); ?></p>
+
         </div>
 
         <h2>SCM Features</h2>
