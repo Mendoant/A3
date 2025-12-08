@@ -8,7 +8,7 @@ if (isset($_SESSION['Username']) && isset($_SESSION['Role'])) {
         header('Location: erp/dashboard.php');
         exit;
     } else {
-        header('Location: scm/dashboard_scm.php');
+        header('Location: scm/dashboard.php');
         exit;
     }
 }
