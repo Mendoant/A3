@@ -237,7 +237,87 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
     <link rel="stylesheet" href="../assets/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <style>
-       
+       .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; }
+        .company-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin: 30px 0; }
+        .company-grid-wrapper { 
+            max-height: 600px; 
+            overflow-y: auto; 
+            padding: 20px; 
+            background: rgba(0,0,0,0.3);
+            border: 2px solid rgba(207,185,145,0.3);
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .company-grid-wrapper::-webkit-scrollbar { width: 12px; }
+        .company-grid-wrapper::-webkit-scrollbar-track { background: rgba(0,0,0,0.5); border-radius: 6px; }
+        .company-grid-wrapper::-webkit-scrollbar-thumb { background: #CFB991; border-radius: 6px; }
+        .company-grid-wrapper::-webkit-scrollbar-thumb:hover { background: #b89968; }
+        .company-card { background: rgba(0,0,0,0.6); padding: 24px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); transition: all 0.3s; }
+        .company-card:hover { border-color: var(--purdue-gold); transform: translateY(-2px); }
+        .company-card h3 { margin: 0 0 10px 0; color: var(--purdue-gold); font-size: 1.3rem; }
+        .company-card .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; font-size: 0.9rem; }
+        .company-card .meta div { color: var(--text-light); }
+        .company-card .meta strong { color: var(--purdue-gold); }
+        .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(207,185,145,0.3); }
+        .kpi-item { text-align: center; }
+        .kpi-item .value { font-size: 1.5rem; font-weight: bold; color: var(--purdue-gold); }
+        .kpi-item .label { font-size: 0.75rem; color: var(--text-light); margin-top: 4px; }
+        .health-score { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.9rem; }
+        .health-good { background: #4caf50; color: white; }
+        .health-warning { background: #ff9800; color: white; }
+        .health-bad { background: #f44336; color: white; }
+        .tier-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; font-weight: bold; background: rgba(207,185,145,0.2); color: var(--purdue-gold); }
+        .actions { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(207,185,145,0.3); display: flex; gap: 10px; flex-wrap: wrap; }
+        .actions a, .actions button { display: inline-block; padding: 8px 16px; background: var(--purdue-gold); color: black; text-decoration: none; border-radius: 4px; font-size: 0.9rem; border: none; cursor: pointer; }
+        .actions a:hover, .actions button:hover { background: #d4c49e; }
+        .actions .btn-details { background: rgba(207,185,145,0.3); color: var(--purdue-gold); border: 1px solid var(--purdue-gold); }
+        .actions .btn-details:hover { background: rgba(207,185,145,0.4); }
+        
+        /* Detail Modal Styles */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; overflow-y: auto; }
+        .modal.active { display: block; }
+        .modal-content { background: #1a1a1a; border: 2px solid var(--purdue-gold); border-radius: 8px; max-width: 1200px; margin: 30px auto; padding: 30px; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { color: var(--purdue-gold); margin: 0; }
+        .close-btn { background: #f44336; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; }
+        .close-btn:hover { background: #d32f2f; }
+        .info-tabs { display: flex; gap: 10px; margin: 20px 0; border-bottom: 2px solid rgba(207,185,145,0.3); }
+        .tab-btn { padding: 10px 20px; background: transparent; border: none; border-bottom: 3px solid transparent; color: rgba(255,255,255,0.6); cursor: pointer; font-size: 1rem; font-weight: bold; }
+        .tab-btn.active { color: var(--purdue-gold); border-bottom-color: var(--purdue-gold); }
+        .tab-btn:hover { color: var(--purdue-gold); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin: 20px 0; }
+        .info-section { background: rgba(0,0,0,0.6); padding: 20px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); }
+        .info-section h3 { margin-top: 0; color: var(--purdue-gold); border-bottom: 2px solid rgba(207,185,145,0.3); padding-bottom: 10px; }
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(207,185,145,0.1); }
+        .info-label { color: rgba(255,255,255,0.7); font-weight: 600; }
+        .info-value { color: var(--purdue-gold); font-weight: bold; }
+        .dependency-list, .product-list { list-style: none; padding: 0; margin: 10px 0; }
+        .dependency-list li, .product-list li { padding: 8px; background: rgba(207,185,145,0.1); margin: 5px 0; border-radius: 4px; }
+        .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+        .product-badge { padding: 10px; background: rgba(207,185,145,0.2); border-radius: 4px; text-align: center; }
+        .kpi-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
+        .kpi-card-detail { background: rgba(0,0,0,0.6); padding: 20px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); text-align: center; }
+        .kpi-card-detail h4 { margin: 0; font-size: 2rem; color: var(--purdue-gold); }
+        .kpi-card-detail p { margin: 8px 0 0 0; color: rgba(255,255,255,0.8); }
+        .transaction-table-wrapper { max-height: 400px; overflow-y: auto; border: 2px solid rgba(207,185,145,0.3); border-radius: 8px; background: rgba(0,0,0,0.3); }
+        .transaction-table-wrapper::-webkit-scrollbar { width: 10px; }
+        .transaction-table-wrapper::-webkit-scrollbar-track { background: rgba(0,0,0,0.5); }
+        .transaction-table-wrapper::-webkit-scrollbar-thumb { background: #CFB991; border-radius: 5px; }
+        table { width: 100%; border-collapse: collapse; }
+        table th { background: rgba(207,185,145,0.3); color: var(--purdue-gold); padding: 10px; text-align: left; position: sticky; top: 0; }
+        table td { padding: 8px 10px; border-bottom: 1px solid rgba(207,185,145,0.1); }
+        .chart-container { background: rgba(0,0,0,0.6); padding: 20px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); }
+        .chart-wrapper { position: relative; height: 300px; }
+        .date-filter-bar { background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
+        .date-filter-bar label { color: var(--purdue-gold); font-weight: bold; }
+        .date-filter-bar input { padding: 8px; border: 1px solid var(--purdue-gold); background: rgba(0,0,0,0.5); color: white; border-radius: 4px; }
+        .date-filter-bar button { padding: 8px 20px; background: var(--purdue-gold); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .impact-high { background: #f44336; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; }
+        .impact-medium { background: #ff9800; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; }
+        .impact-low { background: #4caf50; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; }
+        .loading { text-align: center; padding: 40px; color: var(--purdue-gold); }
     </style>
 </head>
 <body>
