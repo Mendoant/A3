@@ -5,10 +5,10 @@ session_start();
 // If already logged in, redirect based on role
 if (isset($_SESSION['Username']) && isset($_SESSION['Role'])) {
     if ($_SESSION['Role'] === 'SeniorManager') {
-        header('Location: dashboard_erp.php');
+        header('Location: erp/dashboard.php');
         exit;
     } else {
-        header('Location: dashboard_scm.php');
+        header('Location: scm/dashboard_scm.php');
         exit;
     }
 }
