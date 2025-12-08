@@ -1,6 +1,7 @@
 <?php
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
+//session_start();
 
 // login.php - login handler that creates a session (PHP 5.4 compatible with legacy hashing)
 require_once 'config.php';
@@ -51,9 +52,10 @@ if ($user && $password_match) {
         header('Location: scm/dashboard.php');
     }
     exit;
-}
-
+}else {
 // failed login
 $_SESSION['login_error'] = 'Invalid username or password';
 header('Location: index.php');
+}
+
 exit;
