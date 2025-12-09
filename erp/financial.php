@@ -1,9 +1,11 @@
 <?php
-// erp/financial.php - Financial Health Overview with AJAX
+// erp/financial.php - Financial Health Overview
+// doing the health calculations here, simpler sql for old mysql versions
+
 require_once '../config.php';
 requireLogin();
 
-// only senior managers can access erp module
+// security check
 if (!hasRole('SeniorManager')) {
     header('Location: ../scm/dashboard.php');
     exit;
@@ -11,153 +13,158 @@ if (!hasRole('SeniorManager')) {
 
 $pdo = getPDO();
 
-// Get filters
+// --- 1. GET FILTER VALUES ---
 $region = isset($_GET['region']) ? $_GET['region'] : '';
 $tierLevel = isset($_GET['tier']) ? $_GET['tier'] : '';
+$companyType = isset($_GET['type']) ? $_GET['type'] : ''; // new type filter
 $minHealth = isset($_GET['min_health']) ? $_GET['min_health'] : '';
+$maxHealth = isset($_GET['max_health']) ? $_GET['max_health'] : ''; // new max filter
+$search = isset($_GET['search']) ? trim($_GET['search']) : ''; 
 
-// Build where clause for filtering
+// date handling
+$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-5 years'));
+$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
+
+$startYear = date('Y', strtotime($startDate));
+$endYear = date('Y', strtotime($endDate));
+
+// --- 2. BUILD SQL QUERY ---
 $where = array('1=1');
 $params = array();
 
-if (!empty($region)) {
-    $where[] = "l.ContinentName = :region";
-    $params[':region'] = $region;
+if (!empty($region)) { 
+    $where[] = "l.ContinentName = :region"; 
+    $params[':region'] = $region; 
+}
+if (!empty($tierLevel)) { 
+    $where[] = "c.TierLevel = :tier"; 
+    $params[':tier'] = $tierLevel; 
+}
+if (!empty($companyType)) {
+    $where[] = "c.Type = :type";
+    $params[':type'] = $companyType;
+}
+if (!empty($search)) { 
+    $where[] = "c.CompanyName LIKE :search"; 
+    $params[':search'] = "%$search%"; 
 }
 
-if (!empty($tierLevel)) {
-    $where[] = "c.TierLevel = :tier";
-    $params[':tier'] = $tierLevel;
-}
+// date range filter
+$where[] = "fr.RepYear >= :startYear AND fr.RepYear <= :endYear";
+$params[':startYear'] = $startYear;
+$params[':endYear'] = $endYear;
 
-$whereClause = 'WHERE ' . implode(' AND ', $where);
-
-// Query: Average financial health by company (sorted)
-// get the most recent health score for each company
+// --- 3. EXECUTE QUERY ---
+// using INNER JOIN to get only companies with actual data
+// calculating average in SQL to save processing time
 $sql = "SELECT 
-            c.CompanyID,
-            c.CompanyName,
-            c.Type,
-            c.TierLevel,
-            l.ContinentName,
-            l.CountryName,
-            fr.RepYear,
-            fr.Quarter,
-            fr.HealthScore
+            c.CompanyID, 
+            c.CompanyName, 
+            c.Type, 
+            c.TierLevel, 
+            l.ContinentName, 
+            AVG(fr.HealthScore) as AvgHealthScore,
+            COUNT(fr.CompanyID) as ReportCount
         FROM Company c
-        LEFT JOIN Location l ON c.LocationID = l.LocationID
-        LEFT JOIN FinancialReport fr ON c.CompanyID = fr.CompanyID
-        $whereClause
-        ORDER BY c.CompanyID, fr.RepYear DESC, fr.Quarter DESC";
+        JOIN Location l ON c.LocationID = l.LocationID
+        JOIN FinancialReport fr ON c.CompanyID = fr.CompanyID
+        WHERE " . implode(' AND ', $where) . "
+        GROUP BY c.CompanyID, c.CompanyName, c.Type, c.TierLevel, l.ContinentName
+        ORDER BY AvgHealthScore DESC";
 
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$allReports = $stmt->fetchAll();
+try {
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rawCompanies = $stmt->fetchAll();
+} catch (PDOException $e) {
+    if (isset($_GET['ajax'])) {
+        echo json_encode(array('success' => false, 'message' => $e->getMessage()));
+        exit;
+    }
+    die("Database Error: " . $e->getMessage());
+}
 
-// Group by company and get only the latest report for each
-$companies = array();
-$seenCompanies = array();
+// --- 4. FILTERING & STATS ---
+$finalCompanies = array();
+$globalSum = 0; 
+$healthyCount = 0; 
+$warningCount = 0; 
+$criticalCount = 0;
 
-foreach ($allReports as $report) {
-    $cid = $report['CompanyID'];
+$typeAgg = array(); 
+$tierAgg = array();
+
+foreach ($rawCompanies as $comp) {
+    $avgScore = floatval($comp['AvgHealthScore']);
     
-    // only take the first (most recent) report for each company
-    if (!isset($seenCompanies[$cid])) {
-        // apply min health filter if set
-        if (!empty($minHealth)) {
-            if ($report['HealthScore'] !== null && floatval($report['HealthScore']) >= floatval($minHealth)) {
-                $companies[] = $report;
-                $seenCompanies[$cid] = true;
-            }
-        } else {
-            $companies[] = $report;
-            $seenCompanies[$cid] = true;
-        }
+    // min health check
+    if (!empty($minHealth) && $avgScore < floatval($minHealth)) {
+        continue; 
     }
+    
+    // max health check (new)
+    if (!empty($maxHealth) && $avgScore > floatval($maxHealth)) {
+        continue;
+    }
+    
+    $finalCompanies[] = $comp;
+    
+    // stats math
+    $globalSum += $avgScore;
+    
+    if ($avgScore >= 75) $healthyCount++;
+    elseif ($avgScore >= 50) $warningCount++;
+    else $criticalCount++;
+    
+    // buckets for type chart
+    $type = $comp['Type'];
+    if (!isset($typeAgg[$type])) { $typeAgg[$type] = array('sum' => 0, 'count' => 0); }
+    $typeAgg[$type]['sum'] += $avgScore;
+    $typeAgg[$type]['count']++;
+    
+    // buckets for tier chart
+    $tier = $comp['TierLevel'];
+    if (!isset($tierAgg[$tier])) { $tierAgg[$tier] = array('sum' => 0, 'count' => 0); }
+    $tierAgg[$tier]['sum'] += $avgScore;
+    $tierAgg[$tier]['count']++;
 }
 
-// Sort by health score descending (best companies first)
-usort($companies, function($a, $b) {
-    $aScore = $a['HealthScore'] !== null ? floatval($a['HealthScore']) : 0;
-    $bScore = $b['HealthScore'] !== null ? floatval($b['HealthScore']) : 0;
-    return $bScore - $aScore; // sort descending
-});
+$totalCompanies = count($finalCompanies);
+$globalAvg = $totalCompanies > 0 ? round($globalSum / $totalCompanies, 1) : 0;
 
-// Calculate summary stats
-$totalCompanies = count($companies);
-$avgHealth = 0;
-$healthyCount = 0;  // >= 75
-$warningCount = 0;  // 50-74
-$criticalCount = 0; // < 50
-
-foreach ($companies as $c) {
-    if ($c['HealthScore'] !== null) {
-        $score = floatval($c['HealthScore']);
-        $avgHealth += $score;
-        
-        if ($score >= 75) {
-            $healthyCount++;
-        } elseif ($score >= 50) {
-            $warningCount++;
-        } else {
-            $criticalCount++;
-        }
-    }
+// preparing chart json data
+$typeHealth = array();
+foreach ($typeAgg as $type => $data) {
+    $typeHealth[] = array('Type' => $type, 'avgHealthScore' => $data['sum'] / $data['count']);
 }
 
-$avgHealth = $totalCompanies > 0 ? round($avgHealth / $totalCompanies, 1) : 0;
+$tierHealth = array();
+ksort($tierAgg); 
+foreach ($tierAgg as $tier => $data) {
+    $tierHealth[] = array('TierLevel' => $tier, 'avgHealthScore' => $data['sum'] / $data['count']);
+}
 
-// Health distribution by region
-$regionSql = "SELECT 
-                l.ContinentName,
-                AVG(fr.HealthScore) as avgHealthScore,
-                COUNT(DISTINCT c.CompanyID) as companyCount
-              FROM Company c
-              LEFT JOIN Location l ON c.LocationID = l.LocationID
-              LEFT JOIN FinancialReport fr ON c.CompanyID = fr.CompanyID
-              WHERE fr.HealthScore IS NOT NULL
-              GROUP BY l.ContinentName
-              ORDER BY avgHealthScore DESC";
-
-$stmt = $pdo->query($regionSql);
-$regionHealth = $stmt->fetchAll();
-
-// Health distribution by tier level
-$tierSql = "SELECT 
-                c.TierLevel,
-                AVG(fr.HealthScore) as avgHealthScore,
-                COUNT(DISTINCT c.CompanyID) as companyCount
-            FROM Company c
-            LEFT JOIN FinancialReport fr ON c.CompanyID = fr.CompanyID
-            WHERE fr.HealthScore IS NOT NULL
-            GROUP BY c.TierLevel
-            ORDER BY c.TierLevel";
-
-$stmt = $pdo->query($tierSql);
-$tierHealth = $stmt->fetchAll();
-
-// AJAX response
+// --- AJAX RETURN ---
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json');
     echo json_encode(array(
         'success' => true,
         'data' => array(
-            'companies' => $companies,
+            'companies' => $finalCompanies,
             'summary' => array(
-                'totalCompanies' => $totalCompanies,
-                'avgHealth' => $avgHealth,
-                'healthyCount' => $healthyCount,
-                'warningCount' => $warningCount,
+                'totalCompanies' => $totalCompanies, 
+                'avgHealth' => $globalAvg, 
+                'healthyCount' => $healthyCount, 
+                'warningCount' => $warningCount, 
                 'criticalCount' => $criticalCount
             ),
-            'regionHealth' => $regionHealth,
+            'typeHealth' => $typeHealth,
             'tierHealth' => $tierHealth
         )
     ));
     exit;
 }
 
-// Get filter options (only on initial load)
 $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentName")->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -165,24 +172,50 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
 <head>
     <meta charset="UTF-8">
     <title>Financial Health - ERP</title>
+    <script src="../assets/forward_protection.js"></script>
     <link rel="stylesheet" href="../assets/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }
-        .stat-card { background: rgba(0,0,0,0.6); padding: 24px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); text-align: center; }
-        .stat-card h3 { margin: 0; font-size: 2rem; color: var(--purdue-gold); }
-        .stat-card p { margin: 8px 0 0 0; color: var(--text-light); }
-        .stat-card.healthy h3 { color: #4caf50; }
-        .stat-card.warning h3 { color: #ff9800; }
-        .stat-card.critical h3 { color: #f44336; }
-        .chart-container { background: rgba(0,0,0,0.6); padding: 24px; border-radius: 12px; border: 2px solid rgba(207,185,145,0.3); margin: 20px 0; }
-        .chart-wrapper { position: relative; height: 350px; }
-        .health-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.9rem; }
-        .health-good { background: #4caf50; color: white; }
-        .health-warning { background: #ff9800; color: white; }
-        .health-bad { background: #f44336; color: white; }
-        .loading { text-align: center; padding: 40px; color: var(--purdue-gold); }
+        .table-scroll-window {
+            height: 500px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            border: 1px solid rgba(207, 185, 145, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        .table-scroll-window table {
+            width: 100%;
+            margin-top: 0;
+            table-layout: auto; 
+        }
+        .table-scroll-window thead th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: #1a1a1a; 
+            border-bottom: 3px solid var(--purdue-gold);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        }
+        .chart-wrapper.full-width {
+            height: 400px;
+        }
+        .tier-col {
+            min-width: 100px;
+        }
+        /* New grid layout for 4x2 inputs */
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            align-items: end;
+        }
+        /* making it responsive for smaller screens just in case */
+        @media (max-width: 1200px) {
+            .filter-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
     </style>
 </head>
 <body>
@@ -190,13 +223,13 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         <div class="container">
             <h1>Enterprise Resource Planning Portal</h1>
             <nav>
-                <span style="color: white;">Welcome, <?= htmlspecialchars($_SESSION['FullName']) ?> (Senior Manager)</span>
-                <a href="../logout.php">Logout</a>
+                <span class="text-white">Welcome, <?= htmlspecialchars($_SESSION['FullName']) ?> (Senior Manager)</span>
+                <a href="../logout.php" class="logout-btn">Logout</a>
             </nav>
         </div>
     </header>
 
-    <nav class="container" style="background: rgba(0,0,0,0.8); padding: 15px 30px; margin-bottom: 30px; border-radius: 8px; display: flex; gap: 20px; flex-wrap: wrap;">
+    <nav class="container sub-nav">
         <a href="dashboard.php">Dashboard</a>
         <a href="financial.php" class="active">Financial Health</a>
         <a href="regional_disruptions.php">Regional Disruptions</a>
@@ -204,16 +237,42 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         <a href="timeline.php">Disruption Timeline</a>
         <a href="companies.php">Company List</a>
         <a href="distributors.php">Distributors</a>
+        <a href="disruptions.php">Disruption Analysis</a>
     </nav>
 
     <div class="container">
         <h2>Financial Health Overview</h2>
 
-        <div class="content-section">
+        <div class="filter-section">
             <h3>Filter Companies</h3>
             <form id="filterForm">
                 <div class="filter-grid">
-                    <div>
+                    <div class="filter-group">
+                        <label>Company Name:</label>
+                        <input type="text" id="search" placeholder="Search name..." value="<?= htmlspecialchars($search) ?>">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Company Type:</label>
+                        <select id="type">
+                            <option value="">All Types</option>
+                            <option value="Manufacturer" <?= $companyType == 'Manufacturer' ? 'selected' : '' ?>>Manufacturer</option>
+                            <option value="Distributor" <?= $companyType == 'Distributor' ? 'selected' : '' ?>>Distributor</option>
+                            <option value="Retailer" <?= $companyType == 'Retailer' ? 'selected' : '' ?>>Retailer</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label>Tier Level:</label>
+                        <select id="tier">
+                            <option value="">All Tiers</option>
+                            <option value="1" <?= $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
+                            <option value="2" <?= $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
+                            <option value="3" <?= $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
                         <label>Region:</label>
                         <select id="region">
                             <option value="">All Regions</option>
@@ -224,36 +283,42 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div>
-                        <label>Tier Level:</label>
-                        <select id="tier">
-                            <option value="">All Tiers</option>
-                            <option value="1" <?= $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
-                            <option value="2" <?= $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
-                            <option value="3" <?= $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
-                        </select>
+
+                    <div class="filter-group">
+                        <label>Start Date:</label>
+                        <input type="date" id="start_date" value="<?= htmlspecialchars($startDate) ?>">
                     </div>
-                    <div>
+                    
+                    <div class="filter-group">
+                        <label>End Date:</label>
+                        <input type="date" id="end_date" value="<?= htmlspecialchars($endDate) ?>">
+                    </div>
+
+                    <div class="filter-group">
                         <label>Min Health Score:</label>
-                        <input type="number" id="min_health" min="0" max="100" step="1" placeholder="0-100" value="<?= htmlspecialchars($minHealth) ?>">
+                        <input type="number" id="min_health" min="0" max="100" step="1" placeholder="0" value="<?= htmlspecialchars($minHealth) ?>">
+                    </div>
+
+                    <div class="filter-group">
+                        <label>Max Health Score:</label>
+                        <input type="number" id="max_health" min="0" max="100" step="1" placeholder="100" value="<?= htmlspecialchars($maxHealth) ?>">
                     </div>
                 </div>
-                <div style="margin-top: 20px; display: flex; gap: 10px;">
-                    <button type="submit">Apply Filters</button>
-                    <button type="button" id="clearBtn" class="btn-secondary">Clear</button>
+                
+                <div class="flex gap-sm mt-sm" style="justify-content: flex-end;">
+                    <button type="button" id="clearBtn" class="btn-reset">Reset Filters</button>
                 </div>
             </form>
         </div>
 
-        <!-- Summary Stats -->
         <div class="stats-grid">
             <div class="stat-card">
                 <h3 id="stat-total"><?= $totalCompanies ?></h3>
                 <p>Total Companies</p>
             </div>
             <div class="stat-card">
-                <h3 id="stat-avg"><?= $avgHealth ?></h3>
-                <p>Avg Health Score</p>
+                <h3 id="stat-avg"><?= $globalAvg ?></h3>
+                <p>Avg Health (Period)</p>
             </div>
             <div class="stat-card healthy">
                 <h3 id="stat-healthy"><?= $healthyCount ?></h3>
@@ -269,17 +334,20 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             </div>
         </div>
 
-        <!-- Charts Row -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
-            <!-- Regional Health Chart -->
+        <div class="chart-container">
+            <h3>Company Financial Health Ranking</h3>
+            <div class="chart-wrapper full-width">
+                <canvas id="companyChart"></canvas>
+            </div>
+        </div>
+
+        <div class="charts-row">
             <div class="chart-container">
-                <h3>Avg Health Score by Region</h3>
+                <h3>Avg Health Score by Company Type</h3>
                 <div class="chart-wrapper">
-                    <canvas id="regionChart"></canvas>
+                    <canvas id="typeChart"></canvas>
                 </div>
             </div>
-
-            <!-- Tier Health Chart -->
             <div class="chart-container">
                 <h3>Avg Health Score by Tier Level</h3>
                 <div class="chart-wrapper">
@@ -288,227 +356,274 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             </div>
         </div>
 
-        <!-- Company Table (sorted by health score) -->
         <div class="content-section">
-            <h3>Companies Ranked by Financial Health (<span id="recordCount"><?= count($companies) ?></span> companies)</h3>
-            <div id="tableWrapper" style="overflow-x: auto;">
-                <?php if (count($companies) > 0): ?>
-                <table>
+            <h3>Companies Ranked by Avg Health (<span id="recordCount"><?= count($finalCompanies) ?></span> companies)</h3>
+            <div id="tableWrapper" class="table-scroll-window">
+                <table style="margin-top:0;">
                     <thead>
                         <tr>
                             <th>Rank</th>
                             <th>Company</th>
                             <th>Type</th>
-                            <th>Tier</th>
+                            <th class="tier-col">Tier</th>
                             <th>Region</th>
-                            <th>Health Score</th>
-                            <th>Latest Report</th>
+                            <th>Avg Score</th>
+                            <th>Reports</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <?php 
-                        $rank = 1;
-                        foreach ($companies as $c): 
-                            $score = $c['HealthScore'] !== null ? floatval($c['HealthScore']) : 0;
-                            $badgeClass = 'health-bad';
-                            if ($score >= 75) {
-                                $badgeClass = 'health-good';
-                            } elseif ($score >= 50) {
-                                $badgeClass = 'health-warning';
-                            }
-                        ?>
-                        <tr>
-                            <td><strong><?= $rank++ ?></strong></td>
-                            <td><?= htmlspecialchars($c['CompanyName']) ?></td>
-                            <td><?= htmlspecialchars($c['Type']) ?></td>
-                            <td>Tier <?= $c['TierLevel'] ?></td>
-                            <td><?= htmlspecialchars($c['ContinentName']) ?></td>
-                            <td>
-                                <span class="health-badge <?= $badgeClass ?>">
-                                    <?= round($score, 1) ?>/100
-                                </span>
-                            </td>
-                            <td><?= $c['Quarter'] ?> <?= $c['RepYear'] ?></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
+                    <tbody id="tableBody">
+                        </tbody>
                 </table>
-                <?php else: ?>
-                <p style="text-align: center; padding: 40px; color: var(--text-light);">No financial data found for the selected filters.</p>
-                <?php endif; ?>
             </div>
         </div>
     </div>
 
     <script>
     (function() {
-        var form = document.getElementById('filterForm');
-        var regionChart = null;
+        var typeChart = null; 
         var tierChart = null;
+        var companyChart = null; 
+        var timeout = null;
+
+        // restore filters
+        if(sessionStorage.getItem('fin_search')) document.getElementById('search').value = sessionStorage.getItem('fin_search');
+        if(sessionStorage.getItem('fin_type')) document.getElementById('type').value = sessionStorage.getItem('fin_type');
+        if(sessionStorage.getItem('fin_region')) document.getElementById('region').value = sessionStorage.getItem('fin_region');
+        if(sessionStorage.getItem('fin_tier')) document.getElementById('tier').value = sessionStorage.getItem('fin_tier');
+        if(sessionStorage.getItem('fin_min')) document.getElementById('min_health').value = sessionStorage.getItem('fin_min');
+        if(sessionStorage.getItem('fin_max')) document.getElementById('max_health').value = sessionStorage.getItem('fin_max');
+        if(sessionStorage.getItem('fin_start')) document.getElementById('start_date').value = sessionStorage.getItem('fin_start');
+        if(sessionStorage.getItem('fin_end')) document.getElementById('end_date').value = sessionStorage.getItem('fin_end');
         
-        // load financial data via ajax
+        load(); 
+
+        // attach listeners
+        var inputs = document.querySelectorAll('#filterForm input, #filterForm select');
+        inputs.forEach(function(input) {
+            if(input.type === 'text' || input.type === 'number') {
+                input.addEventListener('input', function() {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(load, 300);
+                });
+            } else {
+                input.addEventListener('change', load);
+            }
+        });
+
+        document.getElementById('filterForm').addEventListener('submit', function(e) { e.preventDefault(); load(); return false; });
+
         function load() {
-            document.getElementById('tableWrapper').innerHTML = '<div class="loading">Loading...</div>';
+            var tableBody = document.getElementById('tableBody');
+            if(tableBody) tableBody.parentElement.style.opacity = '0.5';
             
-            var params = 'ajax=1&region=' + encodeURIComponent(document.getElementById('region').value) +
-                        '&tier=' + encodeURIComponent(document.getElementById('tier').value) +
-                        '&min_health=' + encodeURIComponent(document.getElementById('min_health').value);
+            // grab inputs
+            var sVal = document.getElementById('search').value;
+            var typVal = document.getElementById('type').value;
+            var rVal = document.getElementById('region').value;
+            var tVal = document.getElementById('tier').value;
+            var sDate = document.getElementById('start_date').value;
+            var eDate = document.getElementById('end_date').value;
+            var minVal = document.getElementById('min_health').value;
+            var maxVal = document.getElementById('max_health').value;
+
+            // save inputs
+            sessionStorage.setItem('fin_search', sVal);
+            sessionStorage.setItem('fin_type', typVal);
+            sessionStorage.setItem('fin_region', rVal);
+            sessionStorage.setItem('fin_tier', tVal);
+            sessionStorage.setItem('fin_start', sDate);
+            sessionStorage.setItem('fin_end', eDate);
+            sessionStorage.setItem('fin_min', minVal);
+            sessionStorage.setItem('fin_max', maxVal);
+
+            var params = 'ajax=1' + 
+                        '&search=' + encodeURIComponent(sVal) +
+                        '&type=' + encodeURIComponent(typVal) +
+                        '&region=' + encodeURIComponent(rVal) +
+                        '&tier=' + encodeURIComponent(tVal) +
+                        '&start_date=' + encodeURIComponent(sDate) +
+                        '&end_date=' + encodeURIComponent(eDate) +
+                        '&min_health=' + encodeURIComponent(minVal) +
+                        '&max_health=' + encodeURIComponent(maxVal);
             
             var xhr = new XMLHttpRequest();
             xhr.open('GET', 'financial.php?' + params, true);
             xhr.onload = function() {
                 if (xhr.status === 200) {
-                    var r = JSON.parse(xhr.responseText);
-                    if (r.success) {
-                        var d = r.data;
-                        var s = d.summary;
-                        
-                        // update summary stats
-                        document.getElementById('stat-total').textContent = s.totalCompanies;
-                        document.getElementById('stat-avg').textContent = s.avgHealth;
-                        document.getElementById('stat-healthy').textContent = s.healthyCount;
-                        document.getElementById('stat-warning').textContent = s.warningCount;
-                        document.getElementById('stat-critical').textContent = s.criticalCount;
-                        
-                        // regional health chart
-                        var regionLabels = [];
-                        var regionScores = [];
-                        
-                        for (var i = 0; i < d.regionHealth.length; i++) {
-                            regionLabels.push(d.regionHealth[i].ContinentName);
-                            regionScores.push(parseFloat(d.regionHealth[i].avgHealthScore));
+                    try {
+                        var r = JSON.parse(xhr.responseText);
+                        if (r.success) {
+                            var d = r.data; var s = d.summary;
+                            
+                            document.getElementById('stat-total').textContent = s.totalCompanies;
+                            document.getElementById('stat-avg').textContent = s.avgHealth;
+                            document.getElementById('stat-healthy').textContent = s.healthyCount;
+                            document.getElementById('stat-warning').textContent = s.warningCount;
+                            document.getElementById('stat-critical').textContent = s.criticalCount;
+                            
+                            updateCharts(d);
+                            buildTable(d.companies);
+                            if(tableBody) tableBody.parentElement.style.opacity = '1';
+                        } else {
+                            if(tableBody) tableBody.innerHTML = '<tr><td colspan="7" class="error">Error: ' + r.message + '</td></tr>';
                         }
-                        
-                        if (regionChart) regionChart.destroy();
-                        
-                        var ctx1 = document.getElementById('regionChart').getContext('2d');
-                        regionChart = new Chart(ctx1, {
-                            type: 'bar',
-                            data: {
-                                labels: regionLabels,
-                                datasets: [{
-                                    label: 'Avg Health Score',
-                                    data: regionScores,
-                                    backgroundColor: '#CFB991'
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                scales: {
-                                    y: { 
-                                        beginAtZero: true, 
-                                        max: 100,
-                                        ticks: { color: 'white' }, 
-                                        grid: { color: 'rgba(207,185,145,0.1)' } 
-                                    },
-                                    x: { ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } }
-                                },
-                                plugins: { legend: { labels: { color: 'white' } } }
-                            }
-                        });
-                        
-                        // tier health chart
-                        var tierLabels = [];
-                        var tierScores = [];
-                        
-                        for (var i = 0; i < d.tierHealth.length; i++) {
-                            tierLabels.push('Tier ' + d.tierHealth[i].TierLevel);
-                            tierScores.push(parseFloat(d.tierHealth[i].avgHealthScore));
-                        }
-                        
-                        if (tierChart) tierChart.destroy();
-                        
-                        var ctx2 = document.getElementById('tierChart').getContext('2d');
-                        tierChart = new Chart(ctx2, {
-                            type: 'bar',
-                            data: {
-                                labels: tierLabels,
-                                datasets: [{
-                                    label: 'Avg Health Score',
-                                    data: tierScores,
-                                    backgroundColor: ['#CFB991', '#d4c49e', '#e0d7b8']
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                scales: {
-                                    y: { 
-                                        beginAtZero: true, 
-                                        max: 100,
-                                        ticks: { color: 'white' }, 
-                                        grid: { color: 'rgba(207,185,145,0.1)' } 
-                                    },
-                                    x: { ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } }
-                                },
-                                plugins: { legend: { labels: { color: 'white' } } }
-                            }
-                        });
-                        
-                        // build table
-                        buildTable(d.companies);
+                    } catch(e) {
+                        console.error("JSON Error:", e);
                     }
                 }
             };
             xhr.send();
         }
-        
-        // build company table sorted by health score
-        function buildTable(companies) {
-            document.getElementById('recordCount').textContent = companies.length;
+
+        function updateCharts(d) {
+            // 1. Company Bar Chart
+            var companyData = d.companies.slice(0, 20);
+            var compLabels = []; 
+            var compScores = [];
+            var compColors = [];
+
+            for(var i=0; i<companyData.length; i++) {
+                compLabels.push(companyData[i].CompanyName);
+                var sc = parseFloat(companyData[i].AvgHealthScore);
+                compScores.push(sc);
+                if (sc >= 75) compColors.push('#4caf50');
+                else if (sc >= 50) compColors.push('#ff9800');
+                else compColors.push('#f44336');
+            }
+
+            if (companyChart) companyChart.destroy();
+            var ctx0 = document.getElementById('companyChart').getContext('2d');
+            companyChart = new Chart(ctx0, {
+                type: 'bar',
+                data: {
+                    labels: compLabels,
+                    datasets: [{
+                        label: 'Avg Health Score',
+                        data: compScores,
+                        backgroundColor: compColors,
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { 
+                        x: { beginAtZero: true, max: 100, ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } }, 
+                        y: { ticks: { color: 'white' }, grid: { display: false } } 
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            // 2. Type Chart
+            var allTypes = ['Manufacturer', 'Distributor', 'Retailer'];
+            var typeScores = [0, 0, 0];
             
-            if (companies.length === 0) {
-                document.getElementById('tableWrapper').innerHTML = 
-                    '<p style="text-align:center;padding:40px;color:var(--text-light)">No financial data found.</p>';
-                return;
+            for (var i = 0; i < d.typeHealth.length; i++) {
+                var dbType = d.typeHealth[i].Type;
+                var score = parseFloat(d.typeHealth[i].avgHealthScore);
+                var index = allTypes.indexOf(dbType);
+                if (index !== -1) typeScores[index] = score;
             }
             
-            var html = '<table><thead><tr><th>Rank</th><th>Company</th><th>Type</th><th>Tier</th><th>Region</th><th>Health Score</th><th>Latest Report</th></tr></thead><tbody>';
+            if (typeChart) typeChart.destroy();
+            var ctx1 = document.getElementById('typeChart').getContext('2d');
+            typeChart = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: allTypes,
+                    datasets: [{
+                        label: 'Avg Health Score',
+                        data: typeScores,
+                        backgroundColor: ['#4caf50', '#2196f3', '#ff9800'],
+                        borderColor: 'transparent'
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, max: 100, ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } }, x: { ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
             
+            // 3. Tier Chart
+            var tierLabels = []; var tierScores = [];
+            for (var i = 0; i < d.tierHealth.length; i++) {
+                tierLabels.push('Tier ' + d.tierHealth[i].TierLevel);
+                tierScores.push(parseFloat(d.tierHealth[i].avgHealthScore));
+            }
+            
+            if (tierChart) tierChart.destroy();
+            var ctx2 = document.getElementById('tierChart').getContext('2d');
+            tierChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: tierLabels,
+                    datasets: [{
+                        label: 'Avg Health Score',
+                        data: tierScores,
+                        backgroundColor: ['#CFB991', '#d4c49e', '#e0d7b8']
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, max: 100, ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } }, x: { ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+        
+        function buildTable(companies) {
+            document.getElementById('recordCount').textContent = companies.length;
+            var tbody = document.getElementById('tableBody');
+            
+            if (companies.length === 0) { 
+                tbody.innerHTML = '<tr><td colspan="7" class="no-data">No financial data found.</td></tr>'; 
+                return; 
+            }
+            
+            var html = '';
             for (var i = 0; i < companies.length; i++) {
                 var c = companies[i];
-                var score = c.HealthScore ? parseFloat(c.HealthScore) : 0;
+                var score = parseFloat(c.AvgHealthScore);
                 var badgeClass = 'health-bad';
                 if (score >= 75) badgeClass = 'health-good';
                 else if (score >= 50) badgeClass = 'health-warning';
                 
-                html += '<tr>' +
-                    '<td><strong>' + (i + 1) + '</strong></td>' +
+                html += '<tr><td><strong>' + (i + 1) + '</strong></td>' +
                     '<td>' + esc(c.CompanyName) + '</td>' +
                     '<td>' + esc(c.Type) + '</td>' +
                     '<td>Tier ' + c.TierLevel + '</td>' +
                     '<td>' + esc(c.ContinentName) + '</td>' +
-                    '<td><span class="health-badge ' + badgeClass + '">' + score.toFixed(1) + '/100</span></td>' +
-                    '<td>' + c.Quarter + ' ' + c.RepYear + '</td>' +
-                    '</tr>';
+                    '<td><span class="health-badge ' + badgeClass + '">' + score.toFixed(1) + '</span></td>' +
+                    '<td>' + c.ReportCount + '</td></tr>';
             }
-            
-            document.getElementById('tableWrapper').innerHTML = html + '</tbody></table>';
+            tbody.innerHTML = html;
         }
         
-        // utility function
-        function esc(t) { 
-            if (!t) return '';
-            var d = document.createElement('div'); 
-            d.textContent = t; 
-            return d.innerHTML; 
-        }
-        
-        // event listeners
-        form.addEventListener('submit', function(e) { 
-            e.preventDefault(); 
-            load(); 
-            return false;
-        });
+        function esc(t) { if (!t) return ''; var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
         
         document.getElementById('clearBtn').addEventListener('click', function() {
+            sessionStorage.removeItem('fin_search');
+            sessionStorage.removeItem('fin_type');
+            sessionStorage.removeItem('fin_region');
+            sessionStorage.removeItem('fin_tier');
+            sessionStorage.removeItem('fin_min');
+            sessionStorage.removeItem('fin_max');
+            sessionStorage.removeItem('fin_start');
+            sessionStorage.removeItem('fin_end');
+
+            document.getElementById('search').value = '';
+            document.getElementById('type').value = '';
             document.getElementById('region').value = '';
             document.getElementById('tier').value = '';
             document.getElementById('min_health').value = '';
+            document.getElementById('max_health').value = '';
+            document.getElementById('start_date').value = '<?= date('Y-m-d', strtotime('-5 years')) ?>';
+            document.getElementById('end_date').value = '<?= date('Y-m-d') ?>';
             load();
         });
-        
     })();
     </script>
 </body>
