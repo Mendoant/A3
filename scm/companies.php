@@ -530,8 +530,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                 <button class="tab-btn active" onclick="switchDetailTab('overview')">Overview</button>
                 <button class="tab-btn" onclick="switchDetailTab('dependencies')">Dependencies</button>
                 <button class="tab-btn" onclick="switchDetailTab('products')">Products</button>
-                <button class="tab-btn" onclick="switchDetailTab('kpis')">KPIs</button>
-                <button class="tab-btn" onclick="switchDetailTab('disruptions')">Disruptions</button>
+                    
                 <button class="tab-btn" onclick="switchDetailTab('transactions')">Transactions</button>
             </div>
 
@@ -715,41 +714,11 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         }
         html += '</div></div>';
         
-        // KPIs TAB
-        html += '<div id="tab-kpis" class="tab-content">';
-        html += '<div class="kpi-cards">';
-        html += '<div class="kpi-card-detail"><h4>' + c.onTimeRate + '%</h4><p>On-Time Delivery</p><small style="color: rgba(255,255,255,0.6);">' + c.onTimeDeliveries + ' / ' + c.totalDeliveries + ' shipments</small></div>';
-        html += '<div class="kpi-card-detail"><h4>' + c.avgDelay + '</h4><p>Avg Delay (Days)</p><small style="color: rgba(255,255,255,0.6);">±' + c.stdDelay + ' std dev</small></div>';
-        html += '<div class="kpi-card-detail"><h4 style="color: ' + (c.disruptions.length > 5 ? '#f44336' : '#CFB991') + '">' + c.disruptions.length + '</h4><p>Disruption Events</p><small style="color: rgba(255,255,255,0.6);">In date range</small></div>';
-        html += '</div>';
+       
         
-        // Charts
-        html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; margin: 20px 0;">';
-        html += '<div class="chart-container"><h3 style="margin-top: 0; color: #CFB991;">Financial Health Over Time</h3><div class="chart-wrapper"><canvas id="detailFinancialChart"></canvas></div></div>';
-        html += '<div class="chart-container"><h3 style="margin-top: 0; color: #CFB991;">Disruption Distribution</h3><div class="chart-wrapper"><canvas id="detailDisruptionChart"></canvas></div></div>';
-        html += '</div>';
-        html += '</div>';
         
-        // DISRUPTIONS TAB
-        html += '<div id="tab-disruptions" class="tab-content">';
-        html += '<div class="info-section"><h3>Disruption Events (' + c.disruptions.length + ' in date range)</h3>';
-        if (c.disruptions.length > 0) {
-            html += '<div class="transaction-table-wrapper"><table><thead><tr><th>Date</th><th>Category</th><th>Impact Level</th><th>Recovery Date</th><th>Recovery Time</th></tr></thead><tbody>';
-            c.disruptions.forEach(function(dis) {
-                var impactClass = 'impact-' + dis.ImpactLevel.toLowerCase();
-                html += '<tr>';
-                html += '<td>' + formatDate(dis.EventDate) + '</td>';
-                html += '<td>' + esc(dis.CategoryName) + '</td>';
-                html += '<td><span class="' + impactClass + '">' + dis.ImpactLevel + '</span></td>';
-                html += '<td>' + (dis.EventRecoveryDate ? formatDate(dis.EventRecoveryDate) : 'Ongoing') + '</td>';
-                html += '<td>' + (dis.recoveryDays ? dis.recoveryDays + ' days' : 'N/A') + '</td>';
-                html += '</tr>';
-            });
-            html += '</tbody></table></div>';
-        } else {
-            html += '<p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">No disruptions in date range</p>';
-        }
-        html += '</div></div>';
+        
+    
         
         // TRANSACTIONS TAB
         html += '<div id="tab-transactions" class="tab-content">';
