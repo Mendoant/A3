@@ -16,31 +16,20 @@ $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', st
 $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
 $distributorID = isset($_GET['distributor_id']) ? $_GET['distributor_id'] : '';
 $region = isset($_GET['region']) ? $_GET['region'] : '';
-$tierLevel = isset($_GET['tier']) ? $_GET['tier'] : '';
 
 // Build where clause for filtering
 $where = array("s.PromisedDate BETWEEN :start AND :end");
 $params = array(':start' => $startDate, ':end' => $endDate);
-$joins = '';
 
 if (!empty($distributorID)) {
     $where[] = "s.DistributorID = :distributorID";
     $params[':distributorID'] = $distributorID;
 }
 
-// Add JOINs for region and tier filtering
-if (!empty($region) || !empty($tierLevel)) {
-    $joins = " LEFT JOIN Location loc ON c.LocationID = loc.LocationID";
-    
-    if (!empty($region)) {
-        $where[] = "loc.ContinentName = :region";
-        $params[':region'] = $region;
-    }
-    
-    if (!empty($tierLevel)) {
-        $where[] = "c.TierLevel = :tier";
-        $params[':tier'] = $tierLevel;
-    }
+// Add region filter (Location is always joined in main query)
+if (!empty($region)) {
+    $where[] = "loc.ContinentName = :region";
+    $params[':region'] = $region;
 }
 
 $whereClause = 'WHERE ' . implode(' AND ', $where);
@@ -113,7 +102,7 @@ $performanceData = $distributors;
 
 // CHART 3: Regional Distribution of Shipments
 $regionSql = "SELECT 
-                loc.ContinentName as region,
+                COALESCE(loc.ContinentName, 'Unknown') as region,
                 COUNT(DISTINCT s.ShipmentID) as shipmentCount
               FROM Shipping s
               JOIN Company c ON s.DistributorID = c.CompanyID
@@ -137,6 +126,7 @@ $tierSql = "SELECT
                 END) as avgOnTimeRate
             FROM Shipping s
             JOIN Company c ON s.DistributorID = c.CompanyID
+            LEFT JOIN Location loc ON c.LocationID = loc.LocationID
             $whereClause
             GROUP BY c.TierLevel
             ORDER BY c.TierLevel";
@@ -151,7 +141,7 @@ $trendSql = "SELECT
                 COUNT(DISTINCT s.ShipmentID) as shipmentCount
               FROM Shipping s
               JOIN Company c ON s.DistributorID = c.CompanyID
-              $joins
+              LEFT JOIN Location loc ON c.LocationID = loc.LocationID
               $whereClause
               GROUP BY month
               ORDER BY month";
@@ -160,10 +150,8 @@ $stmtTrend = $pdo->prepare($trendSql);
 $stmtTrend->execute($params);
 $trendData = $stmtTrend->fetchAll();
 
-// Get shipment status distribution for selected distributor
-$statusDist = array();
-if (!empty($distributorID)) {
-    $sql = "SELECT 
+// Get shipment status distribution - always show (for all distributors or selected one)
+$statusSql = "SELECT 
                 CASE 
                     WHEN s.ActualDate IS NULL THEN 'In Transit'
                     WHEN s.ActualDate <= s.PromisedDate THEN 'On Time'
@@ -171,14 +159,14 @@ if (!empty($distributorID)) {
                 END as status,
                 COUNT(*) as count
             FROM Shipping s
-            WHERE s.DistributorID = :distributorID 
-            AND s.PromisedDate BETWEEN :start AND :end
+            JOIN Company c ON s.DistributorID = c.CompanyID
+            LEFT JOIN Location loc ON c.LocationID = loc.LocationID
+            $whereClause
             GROUP BY status";
-    
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute(array(':distributorID' => $distributorID, ':start' => $startDate, ':end' => $endDate));
-    $statusDist = $stmt->fetchAll();
-}
+
+$stmtStatus = $pdo->prepare($statusSql);
+$stmtStatus->execute($params);
+$statusDist = $stmtStatus->fetchAll();
 
 // AJAX response
 if (isset($_GET['ajax'])) {
@@ -371,15 +359,6 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div>
-                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Tier Level (Optional):</label>
-                        <select id="tier" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
-                            <option value="">All Tiers</option>
-                            <option value="1" <?= $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
-                            <option value="2" <?= $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
-                            <option value="3" <?= $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
-                        </select>
-                    </div>
                 </div>
                 <div style="margin-top: 15px; display: flex; gap: 10px;">
                     <button type="button" id="clearBtn" class="btn-secondary">Clear Filters</button>
@@ -461,8 +440,8 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                 </div>
             </div>
             
-            <!-- Status Distribution (only if specific distributor selected) -->
-            <div class="chart-container" id="statusChartContainer" style="<?= empty($distributorID) ? 'display: none;' : '' ?>">
+            <!-- Status Distribution -->
+            <div class="chart-container">
                 <h3>Shipment Status Distribution</h3>
                 <div class="chart-wrapper">
                     <canvas id="statusChart"></canvas>
@@ -551,8 +530,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             var params = 'ajax=1&start_date=' + encodeURIComponent(document.getElementById('start_date').value) +
                         '&end_date=' + encodeURIComponent(document.getElementById('end_date').value) +
                         '&distributor_id=' + encodeURIComponent(document.getElementById('distributor_id').value) +
-                        '&region=' + encodeURIComponent(document.getElementById('region').value) +
-                        '&tier=' + encodeURIComponent(document.getElementById('tier').value);
+                        '&region=' + encodeURIComponent(document.getElementById('region').value);
             
             var xhr = new XMLHttpRequest();
             xhr.open('GET', 'distributors.php?' + params, true);
@@ -738,12 +716,10 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                 }
             });
             
-            // Status Chart (only if specific distributor selected)
+            // Status Chart (always show for all distributors or selected one)
+            if (charts.status) charts.status.destroy();
+            
             if (chartData.status.length > 0) {
-                document.getElementById('statusChartContainer').style.display = 'block';
-                
-                if (charts.status) charts.status.destroy();
-                
                 var statusLabels = chartData.status.map(function(d) { return d.status; });
                 var statusCounts = chartData.status.map(function(d) { return parseInt(d.count); });
                 var statusColors = statusLabels.map(function(status) {
@@ -772,8 +748,6 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                         }
                     }
                 });
-            } else {
-                document.getElementById('statusChartContainer').style.display = 'none';
             }
             
             // Trend Chart
@@ -831,7 +805,6 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             document.getElementById('end_date').value = '<?= date('Y-m-d') ?>';
             document.getElementById('distributor_id').value = '';
             document.getElementById('region').value = '';
-            document.getElementById('tier').value = '';
             loadData();
         });
         
@@ -840,7 +813,6 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         document.getElementById('end_date').addEventListener('change', loadData);
         document.getElementById('distributor_id').addEventListener('change', loadData);
         document.getElementById('region').addEventListener('change', loadData);
-        document.getElementById('tier').addEventListener('change', loadData);
         
         // Initialize with PHP data
         (function init() {
