@@ -1,5 +1,5 @@
 <?php
-// scm/transactions.php - All Transactions View
+// scm/transactions.php - All Transactions View with AJAX
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
@@ -17,8 +17,63 @@ try {
     // Get filters - default to last 3 months
     $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-3 months'));
     $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
+    $companyID = isset($_GET['company_id']) ? $_GET['company_id'] : '';
+    $region = isset($_GET['region']) ? $_GET['region'] : '';
+    $tierLevel = isset($_GET['tier']) ? $_GET['tier'] : '';
+    
+    // Pagination parameters
+    $shippingPage = isset($_GET['shipping_page']) ? max(1, intval($_GET['shipping_page'])) : 1;
+    $receivingPage = isset($_GET['receiving_page']) ? max(1, intval($_GET['receiving_page'])) : 1;
+    $adjustmentsPage = isset($_GET['adjustments_page']) ? max(1, intval($_GET['adjustments_page'])) : 1;
+    $pageSize = 500;
 
-    // Shipping Transactions
+    // Build WHERE conditions and JOINs for filters
+    $whereParams = array(':start' => $startDate, ':end' => $endDate);
+    $additionalJoins = '';
+    $additionalWhere = '';
+    
+    if (!empty($companyID)) {
+        $whereParams[':companyID'] = $companyID;
+    }
+    
+    if (!empty($region)) {
+        $whereParams[':region'] = $region;
+    }
+    
+    if (!empty($tierLevel)) {
+        $whereParams[':tier'] = $tierLevel;
+    }
+
+    // Shipping Transactions - Get total count first
+    $shippingCountSql = "SELECT COUNT(*) as total
+                         FROM Shipping s
+                         JOIN Company src ON s.SourceCompanyID = src.CompanyID
+                         JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
+    
+    if (!empty($region) || !empty($tierLevel)) {
+        $shippingCountSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
+                               LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
+    }
+    
+    $shippingCountSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
+    
+    if (!empty($companyID)) {
+        $shippingCountSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
+    }
+    if (!empty($region)) {
+        $shippingCountSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
+    }
+    if (!empty($tierLevel)) {
+        $shippingCountSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
+    }
+    
+    $stmtCount = $pdo->prepare($shippingCountSql);
+    $stmtCount->execute($whereParams);
+    $shippingTotal = $stmtCount->fetch()['total'];
+    $shippingTotalPages = ceil($shippingTotal / $pageSize);
+    
+    // Shipping Transactions - Get paginated data
+    $shippingOffset = ($shippingPage - 1) * $pageSize;
     $shippingSql = "SELECT s.ShipmentID, s.PromisedDate, s.ActualDate, s.Quantity,
                            p.ProductName, p.Category,
                            src.CompanyName as SourceCompany,
@@ -28,13 +83,42 @@ try {
                     JOIN Product p ON s.ProductID = p.ProductID
                     JOIN Company src ON s.SourceCompanyID = src.CompanyID
                     JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
-                    JOIN Distributor d ON s.DistributorID = d.CompanyID
-                    JOIN Company dist ON d.CompanyID = dist.CompanyID
-                    WHERE s.PromisedDate BETWEEN :start AND :end
-                    ORDER BY s.PromisedDate DESC";
+                    LEFT JOIN Distributor d ON s.DistributorID = d.CompanyID
+                    LEFT JOIN Company dist ON d.CompanyID = dist.CompanyID";
+    
+    // Add JOINs for region and tier filtering
+    if (!empty($region) || !empty($tierLevel)) {
+        $shippingSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
+                          LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
+    }
+    
+    $shippingSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
+    
+    // Add company filter
+    if (!empty($companyID)) {
+        $shippingSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
+    }
+    
+    // Add region filter
+    if (!empty($region)) {
+        $shippingSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
+    }
+    
+    // Add tier filter
+    if (!empty($tierLevel)) {
+        $shippingSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
+    }
+    
+    $shippingSql .= " ORDER BY s.PromisedDate DESC LIMIT :limit OFFSET :offset";
 
     $stmtShip = $pdo->prepare($shippingSql);
-    $stmtShip->execute(array(':start' => $startDate, ':end' => $endDate));
+    // Bind pagination params separately as integers
+    foreach ($whereParams as $key => $value) {
+        $stmtShip->bindValue($key, $value);
+    }
+    $stmtShip->bindValue(':limit', $pageSize, PDO::PARAM_INT);
+    $stmtShip->bindValue(':offset', $shippingOffset, PDO::PARAM_INT);
+    $stmtShip->execute();
     $shippingData = $stmtShip->fetchAll();
     
     // Calculate status for each shipment
@@ -50,7 +134,37 @@ try {
     }
     unset($ship);
 
-    // Receiving Transactions
+    // Receiving Transactions - Get total count first
+    $receivingCountSql = "SELECT COUNT(*) as total
+                          FROM Receiving r
+                          JOIN Shipping s ON r.ShipmentID = s.ShipmentID
+                          JOIN Company src ON s.SourceCompanyID = src.CompanyID
+                          JOIN Company recv ON r.ReceiverCompanyID = recv.CompanyID";
+    
+    if (!empty($region) || !empty($tierLevel)) {
+        $receivingCountSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
+                                LEFT JOIN Location recvLoc ON recv.LocationID = recvLoc.LocationID";
+    }
+    
+    $receivingCountSql .= " WHERE r.ReceivedDate BETWEEN :start AND :end";
+    
+    if (!empty($companyID)) {
+        $receivingCountSql .= " AND (s.SourceCompanyID = :companyID OR r.ReceiverCompanyID = :companyID)";
+    }
+    if (!empty($region)) {
+        $receivingCountSql .= " AND (srcLoc.ContinentName = :region OR recvLoc.ContinentName = :region)";
+    }
+    if (!empty($tierLevel)) {
+        $receivingCountSql .= " AND (src.TierLevel = :tier OR recv.TierLevel = :tier)";
+    }
+    
+    $stmtCount = $pdo->prepare($receivingCountSql);
+    $stmtCount->execute($whereParams);
+    $receivingTotal = $stmtCount->fetch()['total'];
+    $receivingTotalPages = ceil($receivingTotal / $pageSize);
+    
+    // Receiving Transactions - Get paginated data
+    $receivingOffset = ($receivingPage - 1) * $pageSize;
     $receivingSql = "SELECT r.ReceivingID, r.ReceivedDate, r.QuantityReceived,
                             p.ProductName, p.Category,
                             src.CompanyName as SourceCompany,
@@ -59,25 +173,107 @@ try {
                      JOIN Shipping s ON r.ShipmentID = s.ShipmentID
                      JOIN Product p ON s.ProductID = p.ProductID
                      JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                     JOIN Company recv ON r.ReceiverCompanyID = recv.CompanyID
-                     WHERE r.ReceivedDate BETWEEN :start AND :end
-                     ORDER BY r.ReceivedDate DESC";
+                     JOIN Company recv ON r.ReceiverCompanyID = recv.CompanyID";
+    
+    // Add JOINs for region and tier filtering
+    if (!empty($region) || !empty($tierLevel)) {
+        $receivingSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
+                           LEFT JOIN Location recvLoc ON recv.LocationID = recvLoc.LocationID";
+    }
+    
+    $receivingSql .= " WHERE r.ReceivedDate BETWEEN :start AND :end";
+    
+    // Add company filter
+    if (!empty($companyID)) {
+        $receivingSql .= " AND (s.SourceCompanyID = :companyID OR r.ReceiverCompanyID = :companyID)";
+    }
+    
+    // Add region filter
+    if (!empty($region)) {
+        $receivingSql .= " AND (srcLoc.ContinentName = :region OR recvLoc.ContinentName = :region)";
+    }
+    
+    // Add tier filter
+    if (!empty($tierLevel)) {
+        $receivingSql .= " AND (src.TierLevel = :tier OR recv.TierLevel = :tier)";
+    }
+    
+    $receivingSql .= " ORDER BY r.ReceivedDate DESC LIMIT :limit OFFSET :offset";
 
     $stmtRecv = $pdo->prepare($receivingSql);
-    $stmtRecv->execute(array(':start' => $startDate, ':end' => $endDate));
+    foreach ($whereParams as $key => $value) {
+        $stmtRecv->bindValue($key, $value);
+    }
+    $stmtRecv->bindValue(':limit', $pageSize, PDO::PARAM_INT);
+    $stmtRecv->bindValue(':offset', $receivingOffset, PDO::PARAM_INT);
+    $stmtRecv->execute();
     $receivingData = $stmtRecv->fetchAll();
 
-    // Inventory Adjustments
+    // Inventory Adjustments - Get total count first
+    $adjustmentsCountSql = "SELECT COUNT(*) as total
+                            FROM InventoryAdjustment ia
+                            JOIN Company c ON ia.CompanyID = c.CompanyID";
+    
+    if (!empty($region) || !empty($tierLevel)) {
+        $adjustmentsCountSql .= " LEFT JOIN Location loc ON c.LocationID = loc.LocationID";
+    }
+    
+    $adjustmentsCountSql .= " WHERE ia.AdjustmentDate BETWEEN :start AND :end";
+    
+    if (!empty($companyID)) {
+        $adjustmentsCountSql .= " AND ia.CompanyID = :companyID";
+    }
+    if (!empty($region)) {
+        $adjustmentsCountSql .= " AND loc.ContinentName = :region";
+    }
+    if (!empty($tierLevel)) {
+        $adjustmentsCountSql .= " AND c.TierLevel = :tier";
+    }
+    
+    $stmtCount = $pdo->prepare($adjustmentsCountSql);
+    $stmtCount->execute($whereParams);
+    $adjustmentsTotal = $stmtCount->fetch()['total'];
+    $adjustmentsTotalPages = ceil($adjustmentsTotal / $pageSize);
+    
+    // Inventory Adjustments - Get paginated data
+    $adjustmentsOffset = ($adjustmentsPage - 1) * $pageSize;
     $adjustmentsSql = "SELECT ia.AdjustmentID, ia.AdjustmentDate, ia.QuantityChange, ia.Reason,
                               p.ProductName, p.Category,
                               c.CompanyName
                        FROM InventoryAdjustment ia
                        JOIN Product p ON ia.ProductID = p.ProductID
-                       JOIN Company c ON ia.CompanyID = c.CompanyID
-                       ORDER BY ia.AdjustmentDate DESC
-                       LIMIT 500";
+                       JOIN Company c ON ia.CompanyID = c.CompanyID";
+    
+    // Add JOINs for region filtering
+    if (!empty($region) || !empty($tierLevel)) {
+        $adjustmentsSql .= " LEFT JOIN Location loc ON c.LocationID = loc.LocationID";
+    }
+    
+    $adjustmentsSql .= " WHERE ia.AdjustmentDate BETWEEN :start AND :end";
+    
+    // Add company filter
+    if (!empty($companyID)) {
+        $adjustmentsSql .= " AND ia.CompanyID = :companyID";
+    }
+    
+    // Add region filter
+    if (!empty($region)) {
+        $adjustmentsSql .= " AND loc.ContinentName = :region";
+    }
+    
+    // Add tier filter
+    if (!empty($tierLevel)) {
+        $adjustmentsSql .= " AND c.TierLevel = :tier";
+    }
+    
+    $adjustmentsSql .= " ORDER BY ia.AdjustmentDate DESC LIMIT :limit OFFSET :offset";
 
     $stmtAdj = $pdo->prepare($adjustmentsSql);
+    foreach ($whereParams as $key => $value) {
+        $stmtAdj->bindValue($key, $value);
+    }
+    $stmtAdj->bindValue(':limit', $pageSize, PDO::PARAM_INT);
+    $stmtAdj->bindValue(':offset', $adjustmentsOffset, PDO::PARAM_INT);
     $stmtAdj->execute();
     $adjustmentsData = $stmtAdj->fetchAll();
     
@@ -92,9 +288,9 @@ try {
     unset($adj);
 
     // Calculate summary metrics
-    $totalShipping = count($shippingData);
-    $totalReceiving = count($receivingData);
-    $totalAdjustments = count($adjustmentsData);
+    $totalShipping = $shippingTotal;
+    $totalReceiving = $receivingTotal;
+    $totalAdjustments = $adjustmentsTotal;
     $totalTransactions = $totalShipping + $totalReceiving + $totalAdjustments;
 
     // Delayed shipments
@@ -106,7 +302,241 @@ try {
     }
     $delayRate = $totalShipping > 0 ? round(($delayed / $totalShipping) * 100, 1) : 0;
 
+    // CHART DATA CALCULATIONS
+    
+    // 1. Shipment Volume Over Time (monthly aggregation)
+    $volumeSql = "SELECT 
+                    DATE_FORMAT(s.PromisedDate, '%Y-%m') as month,
+                    COUNT(*) as shipment_count
+                  FROM Shipping s
+                  JOIN Company src ON s.SourceCompanyID = src.CompanyID
+                  JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
+    
+    if (!empty($region) || !empty($tierLevel)) {
+        $volumeSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
+                        LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
+    }
+    
+    $volumeSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
+    
+    if (!empty($companyID)) {
+        $volumeSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
+    }
+    if (!empty($region)) {
+        $volumeSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
+    }
+    if (!empty($tierLevel)) {
+        $volumeSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
+    }
+    
+    $volumeSql .= " GROUP BY month ORDER BY month";
+    
+    $stmtVolume = $pdo->prepare($volumeSql);
+    $stmtVolume->execute($whereParams);
+    $volumeData = $stmtVolume->fetchAll();
+    
+    // 2. On-Time Delivery Rate Over Time (monthly)
+    $onTimeRateSql = "SELECT 
+                        DATE_FORMAT(s.PromisedDate, '%Y-%m') as month,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN s.ActualDate IS NOT NULL AND s.ActualDate <= s.PromisedDate THEN 1 ELSE 0 END) as onTime
+                      FROM Shipping s
+                      JOIN Company src ON s.SourceCompanyID = src.CompanyID
+                      JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
+    
+    if (!empty($region) || !empty($tierLevel)) {
+        $onTimeRateSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
+                            LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
+    }
+    
+    $onTimeRateSql .= " WHERE s.PromisedDate BETWEEN :start AND :end AND s.ActualDate IS NOT NULL";
+    
+    if (!empty($companyID)) {
+        $onTimeRateSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
+    }
+    if (!empty($region)) {
+        $onTimeRateSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
+    }
+    if (!empty($tierLevel)) {
+        $onTimeRateSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
+    }
+    
+    $onTimeRateSql .= " GROUP BY month ORDER BY month";
+    
+    $stmtOnTimeRate = $pdo->prepare($onTimeRateSql);
+    $stmtOnTimeRate->execute($whereParams);
+    $onTimeRateData = $stmtOnTimeRate->fetchAll();
+    
+    // 3. Shipment Status Distribution
+    $statusSql = "SELECT 
+                    CASE 
+                        WHEN s.ActualDate IS NOT NULL THEN 'Delivered'
+                        WHEN s.PromisedDate < CURDATE() THEN 'Delayed'
+                        ELSE 'In Transit'
+                    END as status,
+                    COUNT(*) as count
+                  FROM Shipping s
+                  JOIN Company src ON s.SourceCompanyID = src.CompanyID
+                  JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
+    
+    if (!empty($region) || !empty($tierLevel)) {
+        $statusSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
+                        LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
+    }
+    
+    $statusSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
+    
+    if (!empty($companyID)) {
+        $statusSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
+    }
+    if (!empty($region)) {
+        $statusSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
+    }
+    if (!empty($tierLevel)) {
+        $statusSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
+    }
+    
+    $statusSql .= " GROUP BY status";
+    
+    $stmtStatus = $pdo->prepare($statusSql);
+    $stmtStatus->execute($whereParams);
+    $statusData = $stmtStatus->fetchAll();
+    
+    // 4. Top Products Handled (by volume)
+    $productsSql = "SELECT 
+                        p.ProductName,
+                        p.Category,
+                        COUNT(*) as shipment_count,
+                        SUM(s.Quantity) as total_quantity
+                    FROM Shipping s
+                    JOIN Product p ON s.ProductID = p.ProductID
+                    JOIN Company src ON s.SourceCompanyID = src.CompanyID
+                    JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
+    
+    if (!empty($region) || !empty($tierLevel)) {
+        $productsSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
+                          LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
+    }
+    
+    $productsSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
+    
+    if (!empty($companyID)) {
+        $productsSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
+    }
+    if (!empty($region)) {
+        $productsSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
+    }
+    if (!empty($tierLevel)) {
+        $productsSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
+    }
+    
+    $productsSql .= " GROUP BY p.ProductID, p.ProductName, p.Category 
+                      ORDER BY total_quantity DESC 
+                      LIMIT 10";
+    
+    $stmtProducts = $pdo->prepare($productsSql);
+    $stmtProducts->execute($whereParams);
+    $productsData = $stmtProducts->fetchAll();
+    
+    // 5. Disruption Exposure Score (total disruptions + 2 * high impact events)
+    $disruptionSql = "SELECT 
+                        DATE_FORMAT(de.EventDate, '%Y-%m') as month,
+                        COUNT(DISTINCT de.EventID) as total_disruptions,
+                        SUM(CASE WHEN ic.ImpactLevel = 'High' THEN 1 ELSE 0 END) as high_impact
+                      FROM DisruptionEvent de
+                      LEFT JOIN ImpactsCompany ic ON de.EventID = ic.EventID";
+    
+    if (!empty($companyID) || !empty($region) || !empty($tierLevel)) {
+        $disruptionSql .= " LEFT JOIN Company c ON ic.AffectedCompanyID = c.CompanyID";
+        
+        if (!empty($region) || !empty($tierLevel)) {
+            $disruptionSql .= " LEFT JOIN Location loc ON c.LocationID = loc.LocationID";
+        }
+    }
+    
+    $disruptionSql .= " WHERE de.EventDate BETWEEN :start AND :end";
+    
+    if (!empty($companyID)) {
+        $disruptionSql .= " AND ic.AffectedCompanyID = :companyID";
+    }
+    if (!empty($region)) {
+        $disruptionSql .= " AND loc.ContinentName = :region";
+    }
+    if (!empty($tierLevel)) {
+        $disruptionSql .= " AND c.TierLevel = :tier";
+    }
+    
+    $disruptionSql .= " GROUP BY month ORDER BY month";
+    
+    $stmtDisruption = $pdo->prepare($disruptionSql);
+    $stmtDisruption->execute($whereParams);
+    $disruptionData = $stmtDisruption->fetchAll();
+    
+    // Calculate disruption exposure scores
+    foreach ($disruptionData as &$row) {
+        $row['exposure_score'] = intval($row['total_disruptions']) + (2 * intval($row['high_impact']));
+    }
+    unset($row);
+
+    // AJAX response
+    if (isset($_GET['ajax'])) {
+        header('Content-Type: application/json');
+        echo json_encode(array(
+            'success' => true,
+            'data' => array(
+                'shipping' => $shippingData,
+                'receiving' => $receivingData,
+                'adjustments' => $adjustmentsData,
+                'metrics' => array(
+                    'totalTransactions' => $totalTransactions,
+                    'totalShipping' => $totalShipping,
+                    'totalReceiving' => $totalReceiving,
+                    'totalAdjustments' => $totalAdjustments,
+                    'delayed' => $delayed,
+                    'delayRate' => $delayRate
+                ),
+                'charts' => array(
+                    'volume' => $volumeData,
+                    'onTimeRate' => $onTimeRateData,
+                    'status' => $statusData,
+                    'products' => $productsData,
+                    'disruption' => $disruptionData
+                ),
+                'pagination' => array(
+                    'shipping' => array(
+                        'currentPage' => $shippingPage,
+                        'totalPages' => $shippingTotalPages,
+                        'totalRecords' => $shippingTotal,
+                        'pageSize' => $pageSize
+                    ),
+                    'receiving' => array(
+                        'currentPage' => $receivingPage,
+                        'totalPages' => $receivingTotalPages,
+                        'totalRecords' => $receivingTotal,
+                        'pageSize' => $pageSize
+                    ),
+                    'adjustments' => array(
+                        'currentPage' => $adjustmentsPage,
+                        'totalPages' => $adjustmentsTotalPages,
+                        'totalRecords' => $adjustmentsTotal,
+                        'pageSize' => $pageSize
+                    )
+                )
+            )
+        ));
+        exit;
+    }
+
+    // Get all companies and regions for the dropdowns (only needed on initial page load)
+    $allCompanies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName")->fetchAll();
+    $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentName")->fetchAll();
+
 } catch (Exception $e) {
+    if (isset($_GET['ajax'])) {
+        header('Content-Type: application/json');
+        echo json_encode(array('success' => false, 'error' => $e->getMessage()));
+        exit;
+    }
     die("Database error: " . $e->getMessage());
 }
 ?>
@@ -116,6 +546,7 @@ try {
     <meta charset="UTF-8">
     <title>Transactions - SCM</title>
     <link rel="stylesheet" href="../assets/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }
         .metric-card { background: rgba(0,0,0,0.6); padding: 20px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); text-align: center; transition: all 0.3s; }
@@ -200,6 +631,88 @@ try {
         .type-adjustment { background: #9c27b0; color: white; }
         
         .delayed-count { color: #f44336; font-weight: bold; }
+        
+        .content-section {
+            background: rgba(0,0,0,0.6);
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid rgba(207,185,145,0.3);
+            margin-bottom: 20px;
+        }
+        .content-section h3 {
+            margin-top: 0;
+            color: var(--purdue-gold);
+        }
+        
+        .pagination-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: rgba(0,0,0,0.4);
+            border-top: 2px solid rgba(207,185,145,0.3);
+            margin-top: 10px;
+        }
+        
+        .pagination-info {
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+        
+        .pagination-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .page-btn {
+            padding: 8px 16px;
+            background: rgba(207,185,145,0.2);
+            border: 1px solid var(--purdue-gold);
+            color: var(--purdue-gold);
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+        
+        .page-btn:hover:not(:disabled) {
+            background: var(--purdue-gold);
+            color: black;
+        }
+        
+        .page-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        .charts-section {
+            margin: 30px 0;
+        }
+        
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .chart-card {
+            background: rgba(0,0,0,0.6);
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid rgba(207,185,145,0.3);
+        }
+        
+        .chart-card h3 {
+            margin: 0 0 15px 0;
+            color: var(--purdue-gold);
+            font-size: 1.1rem;
+        }
+        
+        .chart-wrapper {
+            position: relative;
+            height: 300px;
+        }
     </style>
 </head>
 <body>
@@ -229,20 +742,50 @@ try {
         <!-- Date Filter -->
         <div class="content-section">
             <h3>Filter Transactions</h3>
-            <form method="GET" id="filterForm">
-                <div style="display: flex; gap: 15px; align-items: end; flex-wrap: wrap;">
+            <form id="filterForm">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                     <div>
                         <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Start Date:</label>
-                        <input type="date" name="start_date" id="start_date" value="<?php echo $startDate ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                        <input type="date" id="start_date" value="<?php echo $startDate ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
                     </div>
                     <div>
                         <label style="color: var(--text-light); display: block; margin-bottom: 5px;">End Date:</label>
-                        <input type="date" name="end_date" id="end_date" value="<?php echo $endDate ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                        <input type="date" id="end_date" value="<?php echo $endDate ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                    </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Company (Optional):</label>
+                        <select id="company_id" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                            <option value="">All Companies</option>
+                            <?php foreach ($allCompanies as $c): ?>
+                                <option value="<?= $c['CompanyID'] ?>" <?= $companyID == $c['CompanyID'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($c['CompanyName']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Region (Optional):</label>
+                        <select id="region" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                            <option value="">All Regions</option>
+                            <?php foreach ($allRegions as $r): ?>
+                                <option value="<?= $r['ContinentName'] ?>" <?= $region == $r['ContinentName'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($r['ContinentName']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Tier Level (Optional):</label>
+                        <select id="tier" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                            <option value="">All Tiers</option>
+                            <option value="1" <?= $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
+                            <option value="2" <?= $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
+                            <option value="3" <?= $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
+                        </select>
                     </div>
                 </div>
                 <div style="margin-top: 15px; display: flex; gap: 10px;">
-                    <button type="submit" class="btn-primary">Apply Filter</button>
-                    <button type="button" id="clearBtn" class="btn-secondary">Clear</button>
+                    <button type="button" id="clearBtn" class="btn-secondary">Clear Filter</button>
                 </div>
             </form>
         </div>
@@ -250,37 +793,80 @@ try {
         <!-- Summary Cards -->
         <div class="metrics-grid">
             <div class="metric-card">
-                <h3><?php echo number_format($totalTransactions) ?></h3>
+                <h3 id="metric-total"><?php echo number_format($totalTransactions) ?></h3>
                 <p>Total Transactions</p>
             </div>
             <div class="metric-card">
-                <h3><?php echo number_format($totalShipping) ?></h3>
+                <h3 id="metric-shipping"><?php echo number_format($totalShipping) ?></h3>
                 <p>Shipping Transactions</p>
             </div>
             <div class="metric-card">
-                <h3><?php echo number_format($totalReceiving) ?></h3>
+                <h3 id="metric-receiving"><?php echo number_format($totalReceiving) ?></h3>
                 <p>Receiving Transactions</p>
             </div>
             <div class="metric-card">
-                <h3><?php echo number_format($totalAdjustments) ?></h3>
+                <h3 id="metric-adjustments"><?php echo number_format($totalAdjustments) ?></h3>
                 <p>Inventory Adjustments</p>
             </div>
-            <div class="metric-card">
-                <h3 class="delayed-count"><?php echo $delayed ?></h3>
-                <p>Delayed Shipments (<?php echo $delayRate ?>%)</p>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-section">
+            <h2 style="color: var(--purdue-gold); margin-bottom: 20px;">Transaction Analytics</h2>
+            
+            <div class="charts-grid">
+                <!-- Shipment Volume Over Time -->
+                <div class="chart-card">
+                    <h3>Shipment Volume Over Time</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="volumeChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- On-Time Delivery Rate -->
+                <div class="chart-card">
+                    <h3>On-Time Delivery Rate Over Time</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="onTimeRateChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Shipment Status Distribution -->
+                <div class="chart-card">
+                    <h3>Shipment Status Distribution</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="statusChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Top Products Handled -->
+                <div class="chart-card">
+                    <h3>Top 10 Products by Volume</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="productsChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Disruption Exposure Score -->
+                <div class="chart-card" style="grid-column: span 2;">
+                    <h3>Disruption Exposure Score (Disruptions + 2×High Impact)</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="disruptionChart"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- Tab Navigation -->
         <div class="tab-navigation">
-            <button class="tab-btn active" onclick="switchTab('shipping')">
-                Shipping (<?php echo number_format($totalShipping) ?>)
+            <button class="tab-btn active" data-tab="shipping">
+                Shipping (<span id="tab-count-shipping"><?php echo number_format($totalShipping) ?></span>)
             </button>
-            <button class="tab-btn" onclick="switchTab('receiving')">
-                Receiving (<?php echo number_format($totalReceiving) ?>)
+            <button class="tab-btn" data-tab="receiving">
+                Receiving (<span id="tab-count-receiving"><?php echo number_format($totalReceiving) ?></span>)
             </button>
-            <button class="tab-btn" onclick="switchTab('adjustments')">
-                Adjustments (<?php echo number_format($totalAdjustments) ?>)
+            <button class="tab-btn" data-tab="adjustments">
+                Adjustments (<span id="tab-count-adjustments"><?php echo number_format($totalAdjustments) ?></span>)
             </button>
         </div>
 
@@ -288,49 +874,15 @@ try {
         <div id="tab-shipping" class="tab-content active">
             <div class="content-section">
                 <h3>Shipping Transactions</h3>
-                <div class="table-scroll-wrapper">
-                    <?php if (count($shippingData) > 0): ?>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Shipment ID</th>
-                                <th>Product</th>
-                                <th>Category</th>
-                                <th>Source</th>
-                                <th>Destination</th>
-                                <th>Distributor</th>
-                                <th>Quantity</th>
-                                <th>Promised Date</th>
-                                <th>Actual Date</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($shippingData as $row): ?>
-                            <tr>
-                                <td><?php echo $row['ShipmentID'] ?></td>
-                                <td><?php echo htmlspecialchars($row['ProductName']) ?></td>
-                                <td><?php echo htmlspecialchars($row['Category']) ?></td>
-                                <td><?php echo htmlspecialchars($row['SourceCompany']) ?></td>
-                                <td><?php echo htmlspecialchars($row['DestCompany']) ?></td>
-                                <td><?php echo $row['DistributorName'] ? htmlspecialchars($row['DistributorName']) : 'Direct' ?></td>
-                                <td><?php echo number_format($row['Quantity']) ?></td>
-                                <td><?php echo $row['PromisedDate'] ?></td>
-                                <td><?php echo $row['ActualDate'] ? $row['ActualDate'] : '-' ?></td>
-                                <td>
-                                    <span class="status-badge status-<?php echo strtolower(str_replace(' ', '', $row['Status'])) ?>">
-                                        <?php echo htmlspecialchars($row['Status']) ?>
-                                    </span>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                    <?php else: ?>
-                    <p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">
-                        No shipping transactions found in selected date range.
-                    </p>
-                    <?php endif; ?>
+                <div class="table-scroll-wrapper" id="shipping-table-container">
+                    <!-- Content will be populated by JavaScript -->
+                </div>
+                <div class="pagination-controls" id="shipping-pagination">
+                    <div class="pagination-info" id="shipping-page-info"></div>
+                    <div class="pagination-buttons">
+                        <button class="page-btn" id="shipping-prev-btn" onclick="changePage('shipping', -1)">← Previous</button>
+                        <button class="page-btn" id="shipping-next-btn" onclick="changePage('shipping', 1)">Next →</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -339,39 +891,15 @@ try {
         <div id="tab-receiving" class="tab-content">
             <div class="content-section">
                 <h3>Receiving Transactions</h3>
-                <div class="table-scroll-wrapper">
-                    <?php if (count($receivingData) > 0): ?>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Receiving ID</th>
-                                <th>Product</th>
-                                <th>Category</th>
-                                <th>Source Company</th>
-                                <th>Receiver Company</th>
-                                <th>Quantity Received</th>
-                                <th>Received Date</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($receivingData as $row): ?>
-                            <tr>
-                                <td><?php echo $row['ReceivingID'] ?></td>
-                                <td><?php echo htmlspecialchars($row['ProductName']) ?></td>
-                                <td><?php echo htmlspecialchars($row['Category']) ?></td>
-                                <td><?php echo htmlspecialchars($row['SourceCompany']) ?></td>
-                                <td><?php echo htmlspecialchars($row['ReceiverCompany']) ?></td>
-                                <td><?php echo number_format($row['QuantityReceived']) ?></td>
-                                <td><?php echo $row['ReceivedDate'] ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                    <?php else: ?>
-                    <p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">
-                        No receiving transactions found in selected date range.
-                    </p>
-                    <?php endif; ?>
+                <div class="table-scroll-wrapper" id="receiving-table-container">
+                    <!-- Content will be populated by JavaScript -->
+                </div>
+                <div class="pagination-controls" id="receiving-pagination">
+                    <div class="pagination-info" id="receiving-page-info"></div>
+                    <div class="pagination-buttons">
+                        <button class="page-btn" id="receiving-prev-btn" onclick="changePage('receiving', -1)">← Previous</button>
+                        <button class="page-btn" id="receiving-next-btn" onclick="changePage('receiving', 1)">Next →</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -381,88 +909,558 @@ try {
             <div class="content-section">
                 <h3>Inventory Adjustments</h3>
                 <p style="color: rgba(255,255,255,0.6); margin-bottom: 15px;">
-                    Showing most recent 500 adjustments (sorted by date)
+                    Showing 500 adjustments per page in selected date range
                 </p>
-                <div class="table-scroll-wrapper">
-                    <?php if (count($adjustmentsData) > 0): ?>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Adjustment ID</th>
-                                <th>Date</th>
-                                <th>Company</th>
-                                <th>Product</th>
-                                <th>Category</th>
-                                <th>Type</th>
-                                <th>Quantity Change</th>
-                                <th>Reason</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($adjustmentsData as $row): ?>
-                            <tr>
-                                <td><?php echo $row['AdjustmentID'] ?></td>
-                                <td><?php echo $row['AdjustmentDate'] ?></td>
-                                <td><?php echo htmlspecialchars($row['CompanyName']) ?></td>
-                                <td><?php echo htmlspecialchars($row['ProductName']) ?></td>
-                                <td><?php echo htmlspecialchars($row['Category']) ?></td>
-                                <td>
-                                    <span class="type-badge type-<?php echo strtolower($row['Type']) ?>">
-                                        <?php echo htmlspecialchars($row['Type']) ?>
-                                    </span>
-                                </td>
-                                <td style="color: <?php echo $row['QuantityChange'] > 0 ? '#4caf50' : '#f44336' ?>">
-                                    <?php echo $row['QuantityChange'] > 0 ? '+' : '' ?><?php echo number_format($row['QuantityChange']) ?>
-                                </td>
-                                <td><?php echo $row['Reason'] ? htmlspecialchars($row['Reason']) : '-' ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                    <?php else: ?>
-                    <p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">
-                        No inventory adjustments found.
-                    </p>
-                    <?php endif; ?>
+                <div class="table-scroll-wrapper" id="adjustments-table-container">
+                    <!-- Content will be populated by JavaScript -->
+                </div>
+                <div class="pagination-controls" id="adjustments-pagination">
+                    <div class="pagination-info" id="adjustments-page-info"></div>
+                    <div class="pagination-buttons">
+                        <button class="page-btn" id="adjustments-prev-btn" onclick="changePage('adjustments', -1)">← Previous</button>
+                        <button class="page-btn" id="adjustments-next-btn" onclick="changePage('adjustments', 1)">Next →</button>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-    function switchTab(tabName) {
-        // Hide all tabs
-        var tabs = document.querySelectorAll('.tab-content');
-        tabs.forEach(function(tab) {
-            tab.classList.remove('active');
+    (function() {
+        var currentTab = 'shipping';
+        var pages = {
+            shipping: 1,
+            receiving: 1,
+            adjustments: 1
+        };
+        var paginationData = null;
+        
+        // Chart instances
+        var charts = {
+            volume: null,
+            onTimeRate: null,
+            status: null,
+            products: null,
+            disruption: null
+        };
+        
+        // Load transaction data via AJAX
+        function loadTransactions() {
+            var params = 'ajax=1&start_date=' + encodeURIComponent(document.getElementById('start_date').value) +
+                        '&end_date=' + encodeURIComponent(document.getElementById('end_date').value) +
+                        '&company_id=' + encodeURIComponent(document.getElementById('company_id').value) +
+                        '&region=' + encodeURIComponent(document.getElementById('region').value) +
+                        '&tier=' + encodeURIComponent(document.getElementById('tier').value) +
+                        '&shipping_page=' + pages.shipping +
+                        '&receiving_page=' + pages.receiving +
+                        '&adjustments_page=' + pages.adjustments;
+            
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'transactions.php?' + params, true);
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    var response = JSON.parse(xhr.responseText);
+                    if (response.success) {
+                        paginationData = response.data.pagination;
+                        updateDisplay(response.data);
+                        updateCharts(response.data.charts);
+                    }
+                }
+            };
+            xhr.send();
+        }
+        
+        // Change page for a specific tab
+        window.changePage = function(tab, direction) {
+            pages[tab] = Math.max(1, pages[tab] + direction);
+            loadTransactions();
+        };
+        
+        function updateDisplay(data) {
+            // Update metrics
+            document.getElementById('metric-total').textContent = formatNumber(data.metrics.totalTransactions);
+            document.getElementById('metric-shipping').textContent = formatNumber(data.metrics.totalShipping);
+            document.getElementById('metric-receiving').textContent = formatNumber(data.metrics.totalReceiving);
+            document.getElementById('metric-adjustments').textContent = formatNumber(data.metrics.totalAdjustments);
+            
+            // Update tab counts
+            document.getElementById('tab-count-shipping').textContent = formatNumber(data.metrics.totalShipping);
+            document.getElementById('tab-count-receiving').textContent = formatNumber(data.metrics.totalReceiving);
+            document.getElementById('tab-count-adjustments').textContent = formatNumber(data.metrics.totalAdjustments);
+            
+            // Update tables
+            renderShippingTable(data.shipping);
+            renderReceivingTable(data.receiving);
+            renderAdjustmentsTable(data.adjustments);
+        }
+        
+        function renderShippingTable(data) {
+            var container = document.getElementById('shipping-table-container');
+            
+            if (data.length === 0) {
+                container.innerHTML = '<p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">No shipping transactions found in selected date range.</p>';
+                updatePaginationControls('shipping');
+                return;
+            }
+            
+            var html = '<table><thead><tr>' +
+                '<th>Shipment ID</th><th>Product</th><th>Category</th><th>Source</th><th>Destination</th>' +
+                '<th>Distributor</th><th>Quantity</th><th>Promised Date</th><th>Actual Date</th><th>Status</th>' +
+                '</tr></thead><tbody>';
+            
+            data.forEach(function(row) {
+                var statusClass = row.Status.toLowerCase().replace(/\s+/g, '');
+                html += '<tr>' +
+                    '<td>' + row.ShipmentID + '</td>' +
+                    '<td>' + escapeHtml(row.ProductName) + '</td>' +
+                    '<td>' + escapeHtml(row.Category) + '</td>' +
+                    '<td>' + escapeHtml(row.SourceCompany) + '</td>' +
+                    '<td>' + escapeHtml(row.DestCompany) + '</td>' +
+                    '<td>' + (row.DistributorName ? escapeHtml(row.DistributorName) : 'Direct') + '</td>' +
+                    '<td>' + formatNumber(row.Quantity) + '</td>' +
+                    '<td>' + row.PromisedDate + '</td>' +
+                    '<td>' + (row.ActualDate || '-') + '</td>' +
+                    '<td><span class="status-badge status-' + statusClass + '">' + escapeHtml(row.Status) + '</span></td>' +
+                    '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            container.innerHTML = html;
+            updatePaginationControls('shipping');
+        }
+        
+        function renderReceivingTable(data) {
+            var container = document.getElementById('receiving-table-container');
+            
+            if (data.length === 0) {
+                container.innerHTML = '<p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">No receiving transactions found in selected date range.</p>';
+                updatePaginationControls('receiving');
+                return;
+            }
+            
+            var html = '<table><thead><tr>' +
+                '<th>Receiving ID</th><th>Product</th><th>Category</th><th>Source Company</th>' +
+                '<th>Receiver Company</th><th>Quantity Received</th><th>Received Date</th>' +
+                '</tr></thead><tbody>';
+            
+            data.forEach(function(row) {
+                html += '<tr>' +
+                    '<td>' + row.ReceivingID + '</td>' +
+                    '<td>' + escapeHtml(row.ProductName) + '</td>' +
+                    '<td>' + escapeHtml(row.Category) + '</td>' +
+                    '<td>' + escapeHtml(row.SourceCompany) + '</td>' +
+                    '<td>' + escapeHtml(row.ReceiverCompany) + '</td>' +
+                    '<td>' + formatNumber(row.QuantityReceived) + '</td>' +
+                    '<td>' + row.ReceivedDate + '</td>' +
+                    '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            container.innerHTML = html;
+            updatePaginationControls('receiving');
+        }
+        
+        function renderAdjustmentsTable(data) {
+            var container = document.getElementById('adjustments-table-container');
+            
+            if (data.length === 0) {
+                container.innerHTML = '<p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">No inventory adjustments found.</p>';
+                updatePaginationControls('adjustments');
+                return;
+            }
+            
+            var html = '<table><thead><tr>' +
+                '<th>Adjustment ID</th><th>Date</th><th>Company</th><th>Product</th><th>Category</th>' +
+                '<th>Type</th><th>Quantity Change</th><th>Reason</th>' +
+                '</tr></thead><tbody>';
+            
+            data.forEach(function(row) {
+                var typeClass = row.Type.toLowerCase();
+                var changeColor = row.QuantityChange > 0 ? '#4caf50' : '#f44336';
+                var changePrefix = row.QuantityChange > 0 ? '+' : '';
+                
+                html += '<tr>' +
+                    '<td>' + row.AdjustmentID + '</td>' +
+                    '<td>' + row.AdjustmentDate + '</td>' +
+                    '<td>' + escapeHtml(row.CompanyName) + '</td>' +
+                    '<td>' + escapeHtml(row.ProductName) + '</td>' +
+                    '<td>' + escapeHtml(row.Category) + '</td>' +
+                    '<td><span class="type-badge type-' + typeClass + '">' + escapeHtml(row.Type) + '</span></td>' +
+                    '<td style="color: ' + changeColor + '">' + changePrefix + formatNumber(row.QuantityChange) + '</td>' +
+                    '<td>' + (row.Reason ? escapeHtml(row.Reason) : '-') + '</td>' +
+                    '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            container.innerHTML = html;
+            updatePaginationControls('adjustments');
+        }
+        
+        function updatePaginationControls(tab) {
+            if (!paginationData || !paginationData[tab]) return;
+            
+            var info = paginationData[tab];
+            var start = (info.currentPage - 1) * info.pageSize + 1;
+            var end = Math.min(info.currentPage * info.pageSize, info.totalRecords);
+            
+            // Update info text
+            var infoText = 'Showing ' + formatNumber(start) + '-' + formatNumber(end) + 
+                          ' of ' + formatNumber(info.totalRecords) + ' records (Page ' + 
+                          info.currentPage + ' of ' + info.totalPages + ')';
+            document.getElementById(tab + '-page-info').textContent = infoText;
+            
+            // Update button states
+            var prevBtn = document.getElementById(tab + '-prev-btn');
+            var nextBtn = document.getElementById(tab + '-next-btn');
+            
+            prevBtn.disabled = info.currentPage <= 1;
+            nextBtn.disabled = info.currentPage >= info.totalPages;
+            
+            // Hide pagination if only one page
+            var paginationDiv = document.getElementById(tab + '-pagination');
+            if (info.totalPages <= 1) {
+                paginationDiv.style.display = 'none';
+            } else {
+                paginationDiv.style.display = 'flex';
+            }
+        }
+        
+        // Update all charts with new data
+        function updateCharts(chartData) {
+            // 1. Shipment Volume Chart
+            if (charts.volume) charts.volume.destroy();
+            var volumeLabels = chartData.volume.map(function(d) { return d.month; });
+            var volumeCounts = chartData.volume.map(function(d) { return parseInt(d.shipment_count); });
+            
+            var ctx1 = document.getElementById('volumeChart').getContext('2d');
+            charts.volume = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: volumeLabels,
+                    datasets: [{
+                        label: 'Shipments',
+                        data: volumeCounts,
+                        borderColor: '#CFB991',
+                        backgroundColor: 'rgba(207,185,145,0.2)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { 
+                            beginAtZero: true,
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        x: { 
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    },
+                    plugins: { legend: { labels: { color: 'white' } } }
+                }
+            });
+            
+            // 2. On-Time Delivery Rate Chart
+            if (charts.onTimeRate) charts.onTimeRate.destroy();
+            var onTimeLabels = chartData.onTimeRate.map(function(d) { return d.month; });
+            var onTimeRates = chartData.onTimeRate.map(function(d) { 
+                var total = parseInt(d.total);
+                var onTime = parseInt(d.onTime);
+                return total > 0 ? ((onTime / total) * 100).toFixed(1) : 0;
+            });
+            
+            var ctx2 = document.getElementById('onTimeRateChart').getContext('2d');
+            charts.onTimeRate = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: onTimeLabels,
+                    datasets: [{
+                        label: 'On-Time %',
+                        data: onTimeRates,
+                        borderColor: '#4caf50',
+                        backgroundColor: 'rgba(76,175,80,0.2)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { 
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: { 
+                                color: 'white',
+                                callback: function(value) { return value + '%'; }
+                            },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        x: { 
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    },
+                    plugins: { 
+                        legend: { labels: { color: 'white' } },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + context.parsed.y + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // 3. Status Distribution Chart
+            if (charts.status) charts.status.destroy();
+            var statusLabels = chartData.status.map(function(d) { return d.status; });
+            var statusCounts = chartData.status.map(function(d) { return parseInt(d.count); });
+            var statusColors = statusLabels.map(function(status) {
+                if (status === 'Delivered') return '#4caf50';
+                if (status === 'Delayed') return '#f44336';
+                return '#2196f3';
+            });
+            
+            var ctx3 = document.getElementById('statusChart').getContext('2d');
+            charts.status = new Chart(ctx3, {
+                type: 'doughnut',
+                data: {
+                    labels: statusLabels,
+                    datasets: [{
+                        data: statusCounts,
+                        backgroundColor: statusColors
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { 
+                            labels: { color: 'white' },
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+            
+            // 4. Top Products Chart
+            if (charts.products) charts.products.destroy();
+            var productLabels = chartData.products.map(function(d) { 
+                return d.ProductName.length > 20 ? d.ProductName.substring(0, 20) + '...' : d.ProductName; 
+            });
+            var productQuantities = chartData.products.map(function(d) { return parseInt(d.total_quantity); });
+            
+            var ctx4 = document.getElementById('productsChart').getContext('2d');
+            charts.products = new Chart(ctx4, {
+                type: 'bar',
+                data: {
+                    labels: productLabels,
+                    datasets: [{
+                        label: 'Total Quantity',
+                        data: productQuantities,
+                        backgroundColor: '#CFB991'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    scales: {
+                        x: { 
+                            beginAtZero: true,
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        y: { 
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    },
+                    plugins: { legend: { labels: { color: 'white' } } }
+                }
+            });
+            
+            // 5. Disruption Exposure Chart
+            if (charts.disruption) charts.disruption.destroy();
+            var disruptionLabels = chartData.disruption.map(function(d) { return d.month; });
+            var disruptionScores = chartData.disruption.map(function(d) { return parseInt(d.exposure_score); });
+            var totalDisruptions = chartData.disruption.map(function(d) { return parseInt(d.total_disruptions); });
+            var highImpact = chartData.disruption.map(function(d) { return parseInt(d.high_impact); });
+            
+            var ctx5 = document.getElementById('disruptionChart').getContext('2d');
+            charts.disruption = new Chart(ctx5, {
+                type: 'line',
+                data: {
+                    labels: disruptionLabels,
+                    datasets: [{
+                        label: 'Exposure Score',
+                        data: disruptionScores,
+                        borderColor: '#f44336',
+                        backgroundColor: 'rgba(244,67,54,0.2)',
+                        tension: 0.4,
+                        fill: true,
+                        yAxisID: 'y'
+                    }, {
+                        label: 'Total Disruptions',
+                        data: totalDisruptions,
+                        borderColor: '#ff9800',
+                        backgroundColor: 'rgba(255,152,0,0.2)',
+                        tension: 0.4,
+                        fill: false,
+                        yAxisID: 'y'
+                    }, {
+                        label: 'High Impact Events',
+                        data: highImpact,
+                        borderColor: '#9c27b0',
+                        backgroundColor: 'rgba(156,39,176,0.2)',
+                        tension: 0.4,
+                        fill: false,
+                        yAxisID: 'y'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { 
+                            beginAtZero: true,
+                            position: 'left',
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        x: { 
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    },
+                    plugins: { legend: { labels: { color: 'white' } } }
+                }
+            });
+        }
+        
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var tabName = this.getAttribute('data-tab');
+                
+                // Hide all tabs
+                document.querySelectorAll('.tab-content').forEach(function(tab) {
+                    tab.classList.remove('active');
+                });
+                
+                // Remove active from all buttons
+                document.querySelectorAll('.tab-btn').forEach(function(b) {
+                    b.classList.remove('active');
+                });
+                
+                // Show selected tab
+                document.getElementById('tab-' + tabName).classList.add('active');
+                this.classList.add('active');
+                
+                currentTab = tabName;
+            });
         });
         
-        // Remove active from all buttons
-        var buttons = document.querySelectorAll('.tab-btn');
-        buttons.forEach(function(btn) {
-            btn.classList.remove('active');
+        // Clear button
+        document.getElementById('clearBtn').addEventListener('click', function() {
+            var today = new Date();
+            var threeMonthsAgo = new Date();
+            threeMonthsAgo.setMonth(today.getMonth() - 3);
+            
+            document.getElementById('start_date').value = threeMonthsAgo.toISOString().split('T')[0];
+            document.getElementById('end_date').value = today.toISOString().split('T')[0];
+            document.getElementById('company_id').value = '';
+            document.getElementById('region').value = '';
+            document.getElementById('tier').value = '';
+            
+            // Reset all pages to 1
+            pages.shipping = 1;
+            pages.receiving = 1;
+            pages.adjustments = 1;
+            
+            loadTransactions();
         });
         
-        // Show selected tab
-        document.getElementById('tab-' + tabName).classList.add('active');
+        // Dynamic filter updates - reset to page 1 when filters change
+        function resetAndLoad() {
+            pages.shipping = 1;
+            pages.receiving = 1;
+            pages.adjustments = 1;
+            loadTransactions();
+        }
         
-        // Activate clicked button
-        event.target.classList.add('active');
-    }
-    
-    // Clear button functionality
-    document.getElementById('clearBtn').addEventListener('click', function() {
-        // Reset to default date range (last 3 months)
-        var today = new Date();
-        var threeMonthsAgo = new Date();
-        threeMonthsAgo.setMonth(today.getMonth() - 3);
+        document.getElementById('start_date').addEventListener('change', resetAndLoad);
+        document.getElementById('end_date').addEventListener('change', resetAndLoad);
+        document.getElementById('company_id').addEventListener('change', resetAndLoad);
+        document.getElementById('region').addEventListener('change', resetAndLoad);
+        document.getElementById('tier').addEventListener('change', resetAndLoad);
         
-        document.getElementById('start_date').value = threeMonthsAgo.toISOString().split('T')[0];
-        document.getElementById('end_date').value = today.toISOString().split('T')[0];
+        // Helper functions
+        function formatNumber(num) {
+            return parseInt(num).toLocaleString();
+        }
         
-        // Submit form
-        document.getElementById('filterForm').submit();
-    });
+        function escapeHtml(text) {
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Initialize with PHP data
+        (function init() {
+            var initialData = {
+                shipping: <?php echo json_encode($shippingData) ?>,
+                receiving: <?php echo json_encode($receivingData) ?>,
+                adjustments: <?php echo json_encode($adjustmentsData) ?>,
+                metrics: {
+                    totalTransactions: <?php echo $totalTransactions ?>,
+                    totalShipping: <?php echo $totalShipping ?>,
+                    totalReceiving: <?php echo $totalReceiving ?>,
+                    totalAdjustments: <?php echo $totalAdjustments ?>,
+                    delayed: <?php echo $delayed ?>,
+                    delayRate: <?php echo $delayRate ?>
+                },
+                charts: {
+                    volume: <?php echo json_encode($volumeData) ?>,
+                    onTimeRate: <?php echo json_encode($onTimeRateData) ?>,
+                    status: <?php echo json_encode($statusData) ?>,
+                    products: <?php echo json_encode($productsData) ?>,
+                    disruption: <?php echo json_encode($disruptionData) ?>
+                },
+                pagination: {
+                    shipping: {
+                        currentPage: <?php echo $shippingPage ?>,
+                        totalPages: <?php echo $shippingTotalPages ?>,
+                        totalRecords: <?php echo $shippingTotal ?>,
+                        pageSize: <?php echo $pageSize ?>
+                    },
+                    receiving: {
+                        currentPage: <?php echo $receivingPage ?>,
+                        totalPages: <?php echo $receivingTotalPages ?>,
+                        totalRecords: <?php echo $receivingTotal ?>,
+                        pageSize: <?php echo $pageSize ?>
+                    },
+                    adjustments: {
+                        currentPage: <?php echo $adjustmentsPage ?>,
+                        totalPages: <?php echo $adjustmentsTotalPages ?>,
+                        totalRecords: <?php echo $adjustmentsTotal ?>,
+                        pageSize: <?php echo $pageSize ?>
+                    }
+                }
+            };
+            
+            paginationData = initialData.pagination;
+            updateDisplay(initialData);
+            updateCharts(initialData.charts);
+        })();
+    })();
     </script>
 </body>
 </html>

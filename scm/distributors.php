@@ -15,6 +15,7 @@ $pdo = getPDO();
 $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-1 year'));
 $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
 $distributorID = isset($_GET['distributor_id']) ? $_GET['distributor_id'] : '';
+$region = isset($_GET['region']) ? $_GET['region'] : '';
 
 // Build where clause for filtering
 $where = array("s.PromisedDate BETWEEN :start AND :end");
@@ -25,25 +26,36 @@ if (!empty($distributorID)) {
     $params[':distributorID'] = $distributorID;
 }
 
+// Add region filter (Location is always joined in main query)
+if (!empty($region)) {
+    $where[] = "loc.ContinentName = :region";
+    $params[':region'] = $region;
+}
+
 $whereClause = 'WHERE ' . implode(' AND ', $where);
 
 // Query distributor performance metrics
-// this gets all the key stats we need for each distributor
 $sql = "SELECT 
             c.CompanyID,
             c.CompanyName,
+            c.TierLevel,
+            loc.ContinentName as Region,
             COUNT(DISTINCT s.ShipmentID) as shipmentVolume,
             SUM(s.Quantity) as totalQuantity,
             SUM(CASE WHEN s.ActualDate IS NOT NULL AND s.ActualDate <= s.PromisedDate THEN 1 ELSE 0 END) as onTimeCount,
             SUM(CASE WHEN s.ActualDate IS NOT NULL THEN 1 ELSE 0 END) as completedCount,
             AVG(CASE WHEN s.ActualDate > s.PromisedDate THEN DATEDIFF(s.ActualDate, s.PromisedDate) ELSE 0 END) as avgDelay,
             COUNT(DISTINCT p.ProductID) as productDiversity,
-            COUNT(DISTINCT CASE WHEN s.ActualDate IS NULL THEN s.ShipmentID END) as inTransitCount
+            COUNT(DISTINCT CASE WHEN s.ActualDate IS NULL THEN s.ShipmentID END) as inTransitCount,
+            COUNT(DISTINCT s.SourceCompanyID) as uniqueSourceCompanies,
+            COUNT(DISTINCT s.DestinationCompanyID) as uniqueDestCompanies,
+            SUM(s.Quantity * 2.5) as estimatedRevenue
         FROM Shipping s
         JOIN Company c ON s.DistributorID = c.CompanyID
         JOIN Product p ON s.ProductID = p.ProductID
+        LEFT JOIN Location loc ON c.LocationID = loc.LocationID
         $whereClause
-        GROUP BY c.CompanyID, c.CompanyName
+        GROUP BY c.CompanyID, c.CompanyName, c.TierLevel, loc.ContinentName
         ORDER BY shipmentVolume DESC";
 
 $stmt = $pdo->prepare($sql);
@@ -51,7 +63,6 @@ $stmt->execute($params);
 $distributors = $stmt->fetchAll();
 
 // Calculate additional metrics for each distributor
-// doing this in php instead of sql because its easier to read/debug
 foreach ($distributors as $key => $d) {
     // on-time rate percentage
     $distributors[$key]['onTimeRate'] = $d['completedCount'] > 0 
@@ -62,7 +73,6 @@ foreach ($distributors as $key => $d) {
     $distributors[$key]['avgDelay'] = round($d['avgDelay'], 1);
     
     // calculate disruption exposure for this distributor
-    // formula: total disruptions + (2 * high impact disruptions)
     $disruptSql = "SELECT 
                         COUNT(DISTINCT de.EventID) as totalDisruptions,
                         SUM(CASE WHEN ic.ImpactLevel = 'High' THEN 1 ELSE 0 END) as highImpact
@@ -84,11 +94,64 @@ foreach ($distributors as $key => $d) {
     $distributors[$key]['disruptionExposure'] = $totalDisrupt + (2 * $highImpact);
 }
 
-// Get shipment status distribution for selected distributor
-// this powers the pie chart
-$statusDist = array();
-if (!empty($distributorID)) {
-    $sql = "SELECT 
+// CHART 1: Shipment Volume by Distributor (Top 10)
+$volumeData = array_slice($distributors, 0, 10);
+
+// CHART 2: On-Time Performance Comparison
+$performanceData = $distributors;
+
+// CHART 3: Regional Distribution of Shipments
+$regionSql = "SELECT 
+                COALESCE(loc.ContinentName, 'Unknown') as region,
+                COUNT(DISTINCT s.ShipmentID) as shipmentCount
+              FROM Shipping s
+              JOIN Company c ON s.DistributorID = c.CompanyID
+              LEFT JOIN Location loc ON c.LocationID = loc.LocationID
+              $whereClause
+              GROUP BY loc.ContinentName
+              ORDER BY shipmentCount DESC";
+
+$stmtRegion = $pdo->prepare($regionSql);
+$stmtRegion->execute($params);
+$regionalData = $stmtRegion->fetchAll();
+
+// CHART 4: Tier Level Distribution
+$tierSql = "SELECT 
+                c.TierLevel as tier,
+                COUNT(DISTINCT s.ShipmentID) as shipmentCount,
+                AVG(CASE 
+                    WHEN s.ActualDate IS NOT NULL AND s.ActualDate <= s.PromisedDate 
+                    THEN 100 
+                    ELSE 0 
+                END) as avgOnTimeRate
+            FROM Shipping s
+            JOIN Company c ON s.DistributorID = c.CompanyID
+            LEFT JOIN Location loc ON c.LocationID = loc.LocationID
+            $whereClause
+            GROUP BY c.TierLevel
+            ORDER BY c.TierLevel";
+
+$stmtTier = $pdo->prepare($tierSql);
+$stmtTier->execute($params);
+$tierData = $stmtTier->fetchAll();
+
+// CHART 5: Shipment Volume Over Time
+$trendSql = "SELECT 
+                DATE_FORMAT(s.PromisedDate, '%Y-%m') as month,
+                COUNT(DISTINCT s.ShipmentID) as shipmentCount
+              FROM Shipping s
+              JOIN Company c ON s.DistributorID = c.CompanyID
+              LEFT JOIN Location loc ON c.LocationID = loc.LocationID
+              $whereClause
+              GROUP BY month
+              ORDER BY month";
+
+$stmtTrend = $pdo->prepare($trendSql);
+$stmtTrend->execute($params);
+$trendData = $stmtTrend->fetchAll();
+
+// Get shipment status distribution - always show (for all distributors or selected one)
+$statusSql = "SELECT 
                 CASE 
                     WHEN s.ActualDate IS NULL THEN 'In Transit'
                     WHEN s.ActualDate <= s.PromisedDate THEN 'On Time'
@@ -96,28 +159,36 @@ if (!empty($distributorID)) {
                 END as status,
                 COUNT(*) as count
             FROM Shipping s
-            WHERE s.DistributorID = :distributorID 
-            AND s.PromisedDate BETWEEN :start AND :end
+            JOIN Company c ON s.DistributorID = c.CompanyID
+            LEFT JOIN Location loc ON c.LocationID = loc.LocationID
+            $whereClause
             GROUP BY status";
-    
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute(array(':distributorID' => $distributorID, ':start' => $startDate, ':end' => $endDate));
-    $statusDist = $stmt->fetchAll();
-}
 
-// AJAX response - return json if this is an ajax call
+$stmtStatus = $pdo->prepare($statusSql);
+$stmtStatus->execute($params);
+$statusDist = $stmtStatus->fetchAll();
+
+// AJAX response
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json');
     echo json_encode(array(
         'success' => true,
         'distributors' => $distributors,
-        'statusDistribution' => $statusDist
+        'charts' => array(
+            'volume' => $volumeData,
+            'performance' => $performanceData,
+            'regional' => $regionalData,
+            'tier' => $tierData,
+            'trend' => $trendData,
+            'status' => $statusDist
+        )
     ));
     exit;
 }
 
-// Get all distributors for dropdown (only needed on initial page load)
+// Get all distributors and regions for dropdowns
 $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c JOIN Distributor d ON c.CompanyID = d.CompanyID ORDER BY c.CompanyName")->fetchAll();
+$allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentName")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -127,18 +198,107 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
     <link rel="stylesheet" href="../assets/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }
-        .stat-card { background: rgba(0,0,0,0.6); padding: 24px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); text-align: center; }
-        .stat-card h3 { margin: 0; font-size: 2rem; color: var(--purdue-gold); }
-        .stat-card p { margin: 8px 0 0 0; color: var(--text-light); }
-        .chart-container { background: rgba(0,0,0,0.6); padding: 24px; border-radius: 12px; border: 2px solid rgba(207,185,145,0.3); margin: 20px 0; }
-        .chart-wrapper { position: relative; height: 350px; }
-        .loading { text-align: center; padding: 40px; color: var(--purdue-gold); }
-        .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; font-weight: bold; }
+        .filter-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
+            gap: 15px; 
+            margin-bottom: 20px; 
+        }
+        .stats-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 20px; 
+            margin: 30px 0; 
+        }
+        .stat-card { 
+            background: rgba(0,0,0,0.6); 
+            padding: 24px; 
+            border-radius: 8px; 
+            border: 2px solid rgba(207,185,145,0.3); 
+            text-align: center; 
+            transition: all 0.3s;
+        }
+        .stat-card:hover {
+            border-color: var(--purdue-gold);
+            transform: translateY(-2px);
+        }
+        .stat-card h3 { 
+            margin: 0; 
+            font-size: clamp(0.9rem, 4vw, 2rem); 
+            color: var(--purdue-gold);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .stat-card p { margin: 8px 0 0 0; color: var(--text-light); font-size: 0.9rem; }
+        
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .chart-container { 
+            background: rgba(0,0,0,0.6); 
+            padding: 24px; 
+            border-radius: 12px; 
+            border: 2px solid rgba(207,185,145,0.3); 
+        }
+        .chart-container h3 {
+            margin: 0 0 15px 0;
+            color: var(--purdue-gold);
+        }
+        .chart-wrapper { 
+            position: relative; 
+            height: 350px; 
+        }
+        
+        .content-section {
+            background: rgba(0,0,0,0.6);
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid rgba(207,185,145,0.3);
+            margin-bottom: 20px;
+        }
+        .content-section h3 {
+            margin-top: 0;
+            color: var(--purdue-gold);
+        }
+        
+        .loading { 
+            text-align: center; 
+            padding: 40px; 
+            color: var(--purdue-gold); 
+        }
+        
+        .badge { 
+            padding: 4px 8px; 
+            border-radius: 4px; 
+            font-size: 0.85rem; 
+            font-weight: bold; 
+        }
         .badge-good { background: #4caf50; color: white; }
         .badge-warning { background: #ff9800; color: white; }
         .badge-bad { background: #f44336; color: white; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th { 
+            padding: 12px; 
+            text-align: left; 
+            color: var(--purdue-gold); 
+            font-weight: bold; 
+            border-bottom: 2px solid var(--purdue-gold); 
+            white-space: nowrap; 
+        }
+        td { 
+            padding: 10px 12px; 
+            border-bottom: 1px solid rgba(207,185,145,0.1); 
+            color: var(--text-light); 
+        }
+        tbody tr:hover { 
+            background: rgba(207,185,145,0.1); 
+        }
     </style>
 </head>
 <body>
@@ -169,11 +329,17 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
             <h3>Filter Data</h3>
             <form id="filterForm">
                 <div class="filter-grid">
-                    <div><label>Start Date:</label><input type="date" id="start_date" value="<?= htmlspecialchars($startDate) ?>"></div>
-                    <div><label>End Date:</label><input type="date" id="end_date" value="<?= htmlspecialchars($endDate) ?>"></div>
                     <div>
-                        <label>Distributor (Optional):</label>
-                        <select id="distributor_id">
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Start Date:</label>
+                        <input type="date" id="start_date" value="<?= htmlspecialchars($startDate) ?>" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                    </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">End Date:</label>
+                        <input type="date" id="end_date" value="<?= htmlspecialchars($endDate) ?>" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                    </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Distributor (Optional):</label>
+                        <select id="distributor_id" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
                             <option value="">All Distributors</option>
                             <?php foreach ($allDistributors as $d): ?>
                                 <option value="<?= $d['CompanyID'] ?>" <?= $distributorID == $d['CompanyID'] ? 'selected' : '' ?>>
@@ -182,15 +348,25 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Region (Optional):</label>
+                        <select id="region" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                            <option value="">All Regions</option>
+                            <?php foreach ($allRegions as $r): ?>
+                                <option value="<?= $r['ContinentName'] ?>" <?= $region == $r['ContinentName'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($r['ContinentName']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
                 </div>
-                <div style="margin-top: 20px; display: flex; gap: 10px;">
-                    <button type="submit">Apply Filters</button>
-                    <button type="button" id="clearBtn" class="btn-secondary">Clear</button>
+                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                    <button type="button" id="clearBtn" class="btn-secondary">Clear Filters</button>
                 </div>
             </form>
         </div>
 
-        <!-- summary stats at the top -->
+        <!-- Summary stats -->
         <div class="stats-grid">
             <div class="stat-card">
                 <h3 id="stat-total"><?= count($distributors) ?></h3>
@@ -224,9 +400,64 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
                 </h3>
                 <p>Avg On-Time Rate</p>
             </div>
+            <div class="stat-card">
+                <h3 id="stat-revenue">
+                    $<?php 
+                    $totalRevenue = 0;
+                    foreach ($distributors as $d) {
+                        $totalRevenue += $d['estimatedRevenue'];
+                    }
+                    echo number_format($totalRevenue, 2);
+                    ?>
+                </h3>
+                <p>Est. Total Revenue</p>
+            </div>
         </div>
 
-        <!-- distributor performance table -->
+        <!-- Charts Section -->
+        <div class="charts-grid">
+            <!-- Shipment Volume by Distributor -->
+            <div class="chart-container">
+                <h3>Top 10 Distributors by Volume</h3>
+                <div class="chart-wrapper">
+                    <canvas id="volumeChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Regional Distribution -->
+            <div class="chart-container">
+                <h3>Shipments by Region</h3>
+                <div class="chart-wrapper">
+                    <canvas id="regionalChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Tier Performance -->
+            <div class="chart-container">
+                <h3>Performance by Tier Level</h3>
+                <div class="chart-wrapper">
+                    <canvas id="tierChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Status Distribution -->
+            <div class="chart-container">
+                <h3>Shipment Status Distribution</h3>
+                <div class="chart-wrapper">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Shipment Trend Over Time -->
+            <div class="chart-container" style="grid-column: span 2;">
+                <h3>Shipment Volume Trend</h3>
+                <div class="chart-wrapper">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Distributor performance table -->
         <div class="content-section">
             <h3>Distributor Rankings (<span id="recordCount"><?= count($distributors) ?></span> distributors)</h3>
             <div id="tableWrapper" style="overflow-x: auto;">
@@ -235,19 +466,24 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
                     <thead>
                         <tr>
                             <th>Distributor</th>
-                            <th>Shipment Volume</th>
+                            <th>Region</th>
+                            <th>Tier</th>
+                            <th>Shipments</th>
                             <th>Total Quantity</th>
                             <th>On-Time Rate</th>
-                            <th>Avg Delay (Days)</th>
-                            <th>Products Handled</th>
+                            <th>Avg Delay</th>
+                            <th>Products</th>
+                            <th>Routes</th>
                             <th>In Transit</th>
-                            <th>Disruption Exposure</th>
+                            <th>Disruption Score</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($distributors as $dist): ?>
                         <tr>
                             <td><strong><?= htmlspecialchars($dist['CompanyName']) ?></strong></td>
+                            <td><?= htmlspecialchars($dist['Region'] ?: 'Unknown') ?></td>
+                            <td>Tier <?= $dist['TierLevel'] ?></td>
                             <td><?= number_format($dist['shipmentVolume']) ?></td>
                             <td><?= number_format($dist['totalQuantity']) ?></td>
                             <td>
@@ -265,6 +501,7 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
                             </td>
                             <td><?= $dist['avgDelay'] ?> days</td>
                             <td><?= $dist['productDiversity'] ?></td>
+                            <td><?= $dist['uniqueSourceCompanies'] + $dist['uniqueDestCompanies'] ?></td>
                             <td><?= $dist['inTransitCount'] ?></td>
                             <td><?= $dist['disruptionExposure'] ?></td>
                         </tr>
@@ -276,30 +513,24 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
                 <?php endif; ?>
             </div>
         </div>
-
-        <!-- status distribution chart - only show if specific distributor selected -->
-        <div id="chartsSection" style="<?= empty($distributorID) ? 'display: none;' : '' ?>">
-            <div class="chart-container">
-                <h3>Shipment Status Distribution</h3>
-                <div class="chart-wrapper">
-                    <canvas id="statusChart"></canvas>
-                </div>
-            </div>
-        </div>
     </div>
 
     <script>
     (function() {
-        var form = document.getElementById('filterForm');
-        var statusChart = null; // keep reference so we can destroy it later
+        var charts = {
+            volume: null,
+            regional: null,
+            tier: null,
+            status: null,
+            trend: null
+        };
         
-        // load distributor data via ajax
-        function load() {
-            document.getElementById('tableWrapper').innerHTML = '<div class="loading">Loading...</div>';
-            
+        // Load distributor data via AJAX
+        function loadData() {
             var params = 'ajax=1&start_date=' + encodeURIComponent(document.getElementById('start_date').value) +
                         '&end_date=' + encodeURIComponent(document.getElementById('end_date').value) +
-                        '&distributor_id=' + encodeURIComponent(document.getElementById('distributor_id').value);
+                        '&distributor_id=' + encodeURIComponent(document.getElementById('distributor_id').value) +
+                        '&region=' + encodeURIComponent(document.getElementById('region').value);
             
             var xhr = new XMLHttpRequest();
             xhr.open('GET', 'distributors.php?' + params, true);
@@ -307,113 +538,256 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
                 if (xhr.status === 200) {
                     var r = JSON.parse(xhr.responseText);
                     if (r.success) {
-                        var dists = r.distributors;
-                        
-                        // update summary stats
-                        document.getElementById('stat-total').textContent = dists.length;
-                        
-                        var totalVolume = 0;
-                        var totalRate = 0;
-                        for (var i = 0; i < dists.length; i++) {
-                            totalVolume += parseInt(dists[i].shipmentVolume);
-                            totalRate += parseFloat(dists[i].onTimeRate);
-                        }
-                        
-                        document.getElementById('stat-volume').textContent = num(totalVolume);
-                        
-                        var avgRate = dists.length > 0 ? (totalRate / dists.length).toFixed(1) : 0;
-                        document.getElementById('stat-avgrate').textContent = avgRate + '%';
-                        
-                        // build table
-                        document.getElementById('recordCount').textContent = dists.length;
-                        
-                        if (dists.length === 0) {
-                            document.getElementById('tableWrapper').innerHTML = 
-                                '<p style="text-align:center;padding:40px;color:var(--text-light)">No distributor data found.</p>';
-                        } else {
-                            var html = '<table><thead><tr><th>Distributor</th><th>Shipment Volume</th><th>Total Quantity</th><th>On-Time Rate</th><th>Avg Delay (Days)</th><th>Products Handled</th><th>In Transit</th><th>Disruption Exposure</th></tr></thead><tbody>';
-                            
-                            for (var i = 0; i < dists.length; i++) {
-                                var d = dists[i];
-                                var badgeClass = 'badge-bad';
-                                if (d.onTimeRate >= 90) {
-                                    badgeClass = 'badge-good';
-                                } else if (d.onTimeRate >= 75) {
-                                    badgeClass = 'badge-warning';
-                                }
-                                
-                                html += '<tr>' +
-                                    '<td><strong>' + esc(d.CompanyName) + '</strong></td>' +
-                                    '<td>' + num(d.shipmentVolume) + '</td>' +
-                                    '<td>' + num(d.totalQuantity) + '</td>' +
-                                    '<td><span class="badge ' + badgeClass + '">' + d.onTimeRate + '%</span></td>' +
-                                    '<td>' + d.avgDelay + ' days</td>' +
-                                    '<td>' + d.productDiversity + '</td>' +
-                                    '<td>' + d.inTransitCount + '</td>' +
-                                    '<td>' + d.disruptionExposure + '</td>' +
-                                    '</tr>';
-                            }
-                            
-                            document.getElementById('tableWrapper').innerHTML = html + '</tbody></table>';
-                        }
-                        
-                        // status distribution chart (only if specific distributor selected)
-                        if (r.statusDistribution.length > 0) {
-                            document.getElementById('chartsSection').style.display = 'block';
-                            
-                            var labels = [];
-                            var counts = [];
-                            var colors = [];
-                            
-                            for (var i = 0; i < r.statusDistribution.length; i++) {
-                                var s = r.statusDistribution[i];
-                                labels.push(s.status);
-                                counts.push(parseInt(s.count));
-                                
-                                // color code based on status
-                                if (s.status === 'On Time') {
-                                    colors.push('#4caf50');
-                                } else if (s.status === 'Delayed') {
-                                    colors.push('#f44336');
-                                } else {
-                                    colors.push('#ff9800'); // in transit
-                                }
-                            }
-                            
-                            // destroy old chart if exists
-                            if (statusChart) statusChart.destroy();
-                            
-                            var ctx = document.getElementById('statusChart').getContext('2d');
-                            statusChart = new Chart(ctx, {
-                                type: 'doughnut',
-                                data: {
-                                    labels: labels,
-                                    datasets: [{
-                                        data: counts,
-                                        backgroundColor: colors
-                                    }]
-                                },
-                                options: {
-                                    responsive: true,
-                                    maintainAspectRatio: false,
-                                    plugins: { 
-                                        legend: { 
-                                            labels: { color: 'white' },
-                                            position: 'bottom'
-                                        } 
-                                    }
-                                }
-                            });
-                        } else {
-                            document.getElementById('chartsSection').style.display = 'none';
-                        }
+                        updateSummary(r.distributors);
+                        updateTable(r.distributors);
+                        updateCharts(r.charts);
                     }
                 }
             };
             xhr.send();
         }
         
-        // utility functions
+        function updateSummary(dists) {
+            document.getElementById('stat-total').textContent = dists.length;
+            
+            var totalVolume = 0;
+            var totalRate = 0;
+            var totalRevenue = 0;
+            
+            for (var i = 0; i < dists.length; i++) {
+                totalVolume += parseInt(dists[i].shipmentVolume);
+                totalRate += parseFloat(dists[i].onTimeRate);
+                totalRevenue += parseFloat(dists[i].estimatedRevenue);
+            }
+            
+            document.getElementById('stat-volume').textContent = num(totalVolume);
+            
+            var avgRate = dists.length > 0 ? (totalRate / dists.length).toFixed(1) : 0;
+            document.getElementById('stat-avgrate').textContent = avgRate + '%';
+            
+            document.getElementById('stat-revenue').textContent = '$' + totalRevenue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+        
+        function updateTable(dists) {
+            document.getElementById('recordCount').textContent = dists.length;
+            
+            if (dists.length === 0) {
+                document.getElementById('tableWrapper').innerHTML = 
+                    '<p style="text-align:center;padding:40px;color:var(--text-light)">No distributor data found.</p>';
+                return;
+            }
+            
+            var html = '<table><thead><tr><th>Distributor</th><th>Region</th><th>Tier</th><th>Shipments</th><th>Total Quantity</th><th>On-Time Rate</th><th>Avg Delay</th><th>Products</th><th>Routes</th><th>In Transit</th><th>Disruption Score</th></tr></thead><tbody>';
+            
+            for (var i = 0; i < dists.length; i++) {
+                var d = dists[i];
+                var badgeClass = 'badge-bad';
+                if (d.onTimeRate >= 90) {
+                    badgeClass = 'badge-good';
+                } else if (d.onTimeRate >= 75) {
+                    badgeClass = 'badge-warning';
+                }
+                
+                var routes = parseInt(d.uniqueSourceCompanies) + parseInt(d.uniqueDestCompanies);
+                
+                html += '<tr>' +
+                    '<td><strong>' + esc(d.CompanyName) + '</strong></td>' +
+                    '<td>' + esc(d.Region || 'Unknown') + '</td>' +
+                    '<td>Tier ' + d.TierLevel + '</td>' +
+                    '<td>' + num(d.shipmentVolume) + '</td>' +
+                    '<td>' + num(d.totalQuantity) + '</td>' +
+                    '<td><span class="badge ' + badgeClass + '">' + d.onTimeRate + '%</span></td>' +
+                    '<td>' + d.avgDelay + ' days</td>' +
+                    '<td>' + d.productDiversity + '</td>' +
+                    '<td>' + routes + '</td>' +
+                    '<td>' + d.inTransitCount + '</td>' +
+                    '<td>' + d.disruptionExposure + '</td>' +
+                    '</tr>';
+            }
+            
+            document.getElementById('tableWrapper').innerHTML = html + '</tbody></table>';
+        }
+        
+        function updateCharts(chartData) {
+            // Volume Chart
+            if (charts.volume) charts.volume.destroy();
+            var volumeLabels = chartData.volume.map(function(d) { return d.CompanyName; });
+            var volumeCounts = chartData.volume.map(function(d) { return parseInt(d.shipmentVolume); });
+            
+            charts.volume = new Chart(document.getElementById('volumeChart'), {
+                type: 'bar',
+                data: {
+                    labels: volumeLabels,
+                    datasets: [{
+                        label: 'Shipments',
+                        data: volumeCounts,
+                        backgroundColor: '#CFB991'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: { legend: { labels: { color: 'white' } } },
+                    scales: {
+                        x: {
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        y: {
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    }
+                }
+            });
+            
+            // Regional Chart
+            if (charts.regional) charts.regional.destroy();
+            var regionLabels = chartData.regional.map(function(d) { return d.region || 'Unknown'; });
+            var regionCounts = chartData.regional.map(function(d) { return parseInt(d.shipmentCount); });
+            
+            charts.regional = new Chart(document.getElementById('regionalChart'), {
+                type: 'pie',
+                data: {
+                    labels: regionLabels,
+                    datasets: [{
+                        data: regionCounts,
+                        backgroundColor: ['#CFB991', '#2196f3', '#4caf50', '#ff9800', '#9c27b0', '#f44336']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { 
+                            labels: { color: 'white' },
+                            position: 'bottom'
+                        } 
+                    }
+                }
+            });
+            
+            // Tier Chart
+            if (charts.tier) charts.tier.destroy();
+            var tierLabels = chartData.tier.map(function(d) { return 'Tier ' + d.tier; });
+            var tierCounts = chartData.tier.map(function(d) { return parseInt(d.shipmentCount); });
+            var tierRates = chartData.tier.map(function(d) { return parseFloat(d.avgOnTimeRate).toFixed(1); });
+            
+            charts.tier = new Chart(document.getElementById('tierChart'), {
+                type: 'bar',
+                data: {
+                    labels: tierLabels,
+                    datasets: [{
+                        label: 'Shipment Count',
+                        data: tierCounts,
+                        backgroundColor: '#CFB991',
+                        yAxisID: 'y'
+                    }, {
+                        label: 'Avg On-Time Rate (%)',
+                        data: tierRates,
+                        backgroundColor: '#4caf50',
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: 'white' } } },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            max: 100,
+                            ticks: { color: 'white' },
+                            grid: { display: false }
+                        },
+                        x: {
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    }
+                }
+            });
+            
+            // Status Chart (always show for all distributors or selected one)
+            if (charts.status) charts.status.destroy();
+            
+            if (chartData.status.length > 0) {
+                var statusLabels = chartData.status.map(function(d) { return d.status; });
+                var statusCounts = chartData.status.map(function(d) { return parseInt(d.count); });
+                var statusColors = statusLabels.map(function(status) {
+                    if (status === 'On Time') return '#4caf50';
+                    if (status === 'Delayed') return '#f44336';
+                    return '#ff9800';
+                });
+                
+                charts.status = new Chart(document.getElementById('statusChart'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: statusLabels,
+                        datasets: [{
+                            data: statusCounts,
+                            backgroundColor: statusColors
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { 
+                            legend: { 
+                                labels: { color: 'white' },
+                                position: 'bottom'
+                            } 
+                        }
+                    }
+                });
+            }
+            
+            // Trend Chart
+            if (charts.trend) charts.trend.destroy();
+            var trendLabels = chartData.trend.map(function(d) { return d.month; });
+            var trendCounts = chartData.trend.map(function(d) { return parseInt(d.shipmentCount); });
+            
+            charts.trend = new Chart(document.getElementById('trendChart'), {
+                type: 'line',
+                data: {
+                    labels: trendLabels,
+                    datasets: [{
+                        label: 'Shipments',
+                        data: trendCounts,
+                        borderColor: '#CFB991',
+                        backgroundColor: 'rgba(207,185,145,0.2)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: 'white' } } },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        x: {
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Utility functions
         function esc(t) { 
             if (!t) return '';
             var d = document.createElement('div'); 
@@ -425,20 +799,37 @@ $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Company c
             return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','); 
         }
         
-        // event listeners
-        form.addEventListener('submit', function(e) { 
-            e.preventDefault(); 
-            load(); 
-            return false;
-        });
-        
+        // Clear button
         document.getElementById('clearBtn').addEventListener('click', function() {
             document.getElementById('start_date').value = '<?= date('Y-m-d', strtotime('-1 year')) ?>';
             document.getElementById('end_date').value = '<?= date('Y-m-d') ?>';
             document.getElementById('distributor_id').value = '';
-            load();
+            document.getElementById('region').value = '';
+            loadData();
         });
         
+        // Dynamic filter updates
+        document.getElementById('start_date').addEventListener('change', loadData);
+        document.getElementById('end_date').addEventListener('change', loadData);
+        document.getElementById('distributor_id').addEventListener('change', loadData);
+        document.getElementById('region').addEventListener('change', loadData);
+        
+        // Initialize with PHP data
+        (function init() {
+            var initialData = {
+                distributors: <?php echo json_encode($distributors) ?>,
+                charts: {
+                    volume: <?php echo json_encode($volumeData) ?>,
+                    performance: <?php echo json_encode($performanceData) ?>,
+                    regional: <?php echo json_encode($regionalData) ?>,
+                    tier: <?php echo json_encode($tierData) ?>,
+                    trend: <?php echo json_encode($trendData) ?>,
+                    status: <?php echo json_encode($statusDist) ?>
+                }
+            };
+            
+            updateCharts(initialData.charts);
+        })();
     })();
     </script>
 </body>
