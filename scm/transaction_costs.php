@@ -1,5 +1,5 @@
 <?php
-// scm/transactions.php - All Transactions View with AJAX
+// scm/transaction_costs.php - Transaction Cost Analysis with AJAX
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
@@ -11,626 +11,305 @@ if (hasRole('SeniorManager')) {
     exit;
 }
 
-try {
-    $pdo = getPDO();
+$pdo = getPDO();
 
-    // Get filters - default to last 3 months
-    $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-3 months'));
-    $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
-    $companyID = isset($_GET['company_id']) ? $_GET['company_id'] : '';
-    $region = isset($_GET['region']) ? $_GET['region'] : '';
-    $tierLevel = isset($_GET['tier']) ? $_GET['tier'] : '';
-    
-    // Pagination parameters
-    $shippingPage = isset($_GET['shipping_page']) ? max(1, intval($_GET['shipping_page'])) : 1;
-    $receivingPage = isset($_GET['receiving_page']) ? max(1, intval($_GET['receiving_page'])) : 1;
-    $adjustmentsPage = isset($_GET['adjustments_page']) ? max(1, intval($_GET['adjustments_page'])) : 1;
-    $pageSize = 500;
+// Get filters - default to last 6 months
+$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-6 months'));
+$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
+$companyID = isset($_GET['company_id']) ? $_GET['company_id'] : '';
+$companyType = isset($_GET['company_type']) ? $_GET['company_type'] : '';
+$region = isset($_GET['region']) ? $_GET['region'] : '';
+$tierLevel = isset($_GET['tier']) ? $_GET['tier'] : '';
 
-    // Build WHERE conditions and JOINs for filters
-    $whereParams = array(':start' => $startDate, ':end' => $endDate);
-    $additionalJoins = '';
-    $additionalWhere = '';
-    
-    if (!empty($companyID)) {
-        $whereParams[':companyID'] = $companyID;
-    }
-    
-    if (!empty($region)) {
-        $whereParams[':region'] = $region;
-    }
-    
-    if (!empty($tierLevel)) {
-        $whereParams[':tier'] = $tierLevel;
-    }
+// Build where clause and joins
+$where = array("s.PromisedDate BETWEEN :start AND :end");
+$params = array(':start' => $startDate, ':end' => $endDate);
+$joins = '';
 
-    // Shipping Transactions - Get total count first
-    $shippingCountSql = "SELECT COUNT(*) as total
-                         FROM Shipping s
-                         JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                         JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
-    
-    if (!empty($region) || !empty($tierLevel)) {
-        $shippingCountSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                               LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
-    }
-    
-    $shippingCountSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
-    
-    if (!empty($companyID)) {
-        $shippingCountSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
-    }
-    if (!empty($region)) {
-        $shippingCountSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
-    }
-    if (!empty($tierLevel)) {
-        $shippingCountSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
-    }
-    
-    $stmtCount = $pdo->prepare($shippingCountSql);
-    $stmtCount->execute($whereParams);
-    $shippingTotal = $stmtCount->fetch()['total'];
-    $shippingTotalPages = ceil($shippingTotal / $pageSize);
-    
-    // Shipping Transactions - Get paginated data
-    $shippingOffset = ($shippingPage - 1) * $pageSize;
-    $shippingSql = "SELECT s.ShipmentID, s.PromisedDate, s.ActualDate, s.Quantity,
-                           p.ProductName, p.Category,
-                           src.CompanyName as SourceCompany,
-                           dest.CompanyName as DestCompany,
-                           dist.CompanyName as DistributorName
-                    FROM Shipping s
-                    JOIN Product p ON s.ProductID = p.ProductID
-                    JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                    JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
-                    LEFT JOIN Distributor d ON s.DistributorID = d.CompanyID
-                    LEFT JOIN Company dist ON d.CompanyID = dist.CompanyID";
-    
-    // Add JOINs for region and tier filtering
-    if (!empty($region) || !empty($tierLevel)) {
-        $shippingSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                          LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
-    }
-    
-    $shippingSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
-    
-    // Add company filter
-    if (!empty($companyID)) {
-        $shippingSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
-    }
-    
-    // Add region filter
-    if (!empty($region)) {
-        $shippingSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
-    }
-    
-    // Add tier filter
-    if (!empty($tierLevel)) {
-        $shippingSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
-    }
-    
-    $shippingSql .= " ORDER BY s.PromisedDate DESC LIMIT :limit OFFSET :offset";
-
-    $stmtShip = $pdo->prepare($shippingSql);
-    // Bind pagination params separately as integers
-    foreach ($whereParams as $key => $value) {
-        $stmtShip->bindValue($key, $value);
-    }
-    $stmtShip->bindValue(':limit', $pageSize, PDO::PARAM_INT);
-    $stmtShip->bindValue(':offset', $shippingOffset, PDO::PARAM_INT);
-    $stmtShip->execute();
-    $shippingData = $stmtShip->fetchAll();
-    
-    // Calculate status for each shipment
-    $today = date('Y-m-d');
-    foreach ($shippingData as &$ship) {
-        if ($ship['ActualDate']) {
-            $ship['Status'] = 'Delivered';
-        } elseif ($ship['PromisedDate'] < $today) {
-            $ship['Status'] = 'Delayed';
-        } else {
-            $ship['Status'] = 'In Transit';
-        }
-    }
-    unset($ship);
-
-    // Receiving Transactions - Get total count first
-    $receivingCountSql = "SELECT COUNT(*) as total
-                          FROM Receiving r
-                          JOIN Shipping s ON r.ShipmentID = s.ShipmentID
-                          JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                          JOIN Company recv ON r.ReceiverCompanyID = recv.CompanyID";
-    
-    if (!empty($region) || !empty($tierLevel)) {
-        $receivingCountSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                                LEFT JOIN Location recvLoc ON recv.LocationID = recvLoc.LocationID";
-    }
-    
-    $receivingCountSql .= " WHERE r.ReceivedDate BETWEEN :start AND :end";
-    
-    if (!empty($companyID)) {
-        $receivingCountSql .= " AND (s.SourceCompanyID = :companyID OR r.ReceiverCompanyID = :companyID)";
-    }
-    if (!empty($region)) {
-        $receivingCountSql .= " AND (srcLoc.ContinentName = :region OR recvLoc.ContinentName = :region)";
-    }
-    if (!empty($tierLevel)) {
-        $receivingCountSql .= " AND (src.TierLevel = :tier OR recv.TierLevel = :tier)";
-    }
-    
-    $stmtCount = $pdo->prepare($receivingCountSql);
-    $stmtCount->execute($whereParams);
-    $receivingTotal = $stmtCount->fetch()['total'];
-    $receivingTotalPages = ceil($receivingTotal / $pageSize);
-    
-    // Receiving Transactions - Get paginated data
-    $receivingOffset = ($receivingPage - 1) * $pageSize;
-    $receivingSql = "SELECT r.ReceivingID, r.ReceivedDate, r.QuantityReceived,
-                            p.ProductName, p.Category,
-                            src.CompanyName as SourceCompany,
-                            recv.CompanyName as ReceiverCompany
-                     FROM Receiving r
-                     JOIN Shipping s ON r.ShipmentID = s.ShipmentID
-                     JOIN Product p ON s.ProductID = p.ProductID
-                     JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                     JOIN Company recv ON r.ReceiverCompanyID = recv.CompanyID";
-    
-    // Add JOINs for region and tier filtering
-    if (!empty($region) || !empty($tierLevel)) {
-        $receivingSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                           LEFT JOIN Location recvLoc ON recv.LocationID = recvLoc.LocationID";
-    }
-    
-    $receivingSql .= " WHERE r.ReceivedDate BETWEEN :start AND :end";
-    
-    // Add company filter
-    if (!empty($companyID)) {
-        $receivingSql .= " AND (s.SourceCompanyID = :companyID OR r.ReceiverCompanyID = :companyID)";
-    }
-    
-    // Add region filter
-    if (!empty($region)) {
-        $receivingSql .= " AND (srcLoc.ContinentName = :region OR recvLoc.ContinentName = :region)";
-    }
-    
-    // Add tier filter
-    if (!empty($tierLevel)) {
-        $receivingSql .= " AND (src.TierLevel = :tier OR recv.TierLevel = :tier)";
-    }
-    
-    $receivingSql .= " ORDER BY r.ReceivedDate DESC LIMIT :limit OFFSET :offset";
-
-    $stmtRecv = $pdo->prepare($receivingSql);
-    foreach ($whereParams as $key => $value) {
-        $stmtRecv->bindValue($key, $value);
-    }
-    $stmtRecv->bindValue(':limit', $pageSize, PDO::PARAM_INT);
-    $stmtRecv->bindValue(':offset', $receivingOffset, PDO::PARAM_INT);
-    $stmtRecv->execute();
-    $receivingData = $stmtRecv->fetchAll();
-
-    // Inventory Adjustments - Get total count first
-    $adjustmentsCountSql = "SELECT COUNT(*) as total
-                            FROM InventoryAdjustment ia
-                            JOIN Company c ON ia.CompanyID = c.CompanyID";
-    
-    if (!empty($region) || !empty($tierLevel)) {
-        $adjustmentsCountSql .= " LEFT JOIN Location loc ON c.LocationID = loc.LocationID";
-    }
-    
-    $adjustmentsCountSql .= " WHERE ia.AdjustmentDate BETWEEN :start AND :end";
-    
-    if (!empty($companyID)) {
-        $adjustmentsCountSql .= " AND ia.CompanyID = :companyID";
-    }
-    if (!empty($region)) {
-        $adjustmentsCountSql .= " AND loc.ContinentName = :region";
-    }
-    if (!empty($tierLevel)) {
-        $adjustmentsCountSql .= " AND c.TierLevel = :tier";
-    }
-    
-    $stmtCount = $pdo->prepare($adjustmentsCountSql);
-    $stmtCount->execute($whereParams);
-    $adjustmentsTotal = $stmtCount->fetch()['total'];
-    $adjustmentsTotalPages = ceil($adjustmentsTotal / $pageSize);
-    
-    // Inventory Adjustments - Get paginated data
-    $adjustmentsOffset = ($adjustmentsPage - 1) * $pageSize;
-    $adjustmentsSql = "SELECT ia.AdjustmentID, ia.AdjustmentDate, ia.QuantityChange, ia.Reason,
-                              p.ProductName, p.Category,
-                              c.CompanyName
-                       FROM InventoryAdjustment ia
-                       JOIN Product p ON ia.ProductID = p.ProductID
-                       JOIN Company c ON ia.CompanyID = c.CompanyID";
-    
-    // Add JOINs for region filtering
-    if (!empty($region) || !empty($tierLevel)) {
-        $adjustmentsSql .= " LEFT JOIN Location loc ON c.LocationID = loc.LocationID";
-    }
-    
-    $adjustmentsSql .= " WHERE ia.AdjustmentDate BETWEEN :start AND :end";
-    
-    // Add company filter
-    if (!empty($companyID)) {
-        $adjustmentsSql .= " AND ia.CompanyID = :companyID";
-    }
-    
-    // Add region filter
-    if (!empty($region)) {
-        $adjustmentsSql .= " AND loc.ContinentName = :region";
-    }
-    
-    // Add tier filter
-    if (!empty($tierLevel)) {
-        $adjustmentsSql .= " AND c.TierLevel = :tier";
-    }
-    
-    $adjustmentsSql .= " ORDER BY ia.AdjustmentDate DESC LIMIT :limit OFFSET :offset";
-
-    $stmtAdj = $pdo->prepare($adjustmentsSql);
-    foreach ($whereParams as $key => $value) {
-        $stmtAdj->bindValue($key, $value);
-    }
-    $stmtAdj->bindValue(':limit', $pageSize, PDO::PARAM_INT);
-    $stmtAdj->bindValue(':offset', $adjustmentsOffset, PDO::PARAM_INT);
-    $stmtAdj->execute();
-    $adjustmentsData = $stmtAdj->fetchAll();
-    
-    // Add Type for display
-    foreach ($adjustmentsData as &$adj) {
-        if ($adj['QuantityChange'] > 0) {
-            $adj['Type'] = 'Restock';
-        } else {
-            $adj['Type'] = 'Adjustment';
-        }
-    }
-    unset($adj);
-
-    // Calculate summary metrics
-    $totalShipping = $shippingTotal;
-    $totalReceiving = $receivingTotal;
-    $totalAdjustments = $adjustmentsTotal;
-    $totalTransactions = $totalShipping + $totalReceiving + $totalAdjustments;
-
-    // Delayed shipments
-    $delayed = 0;
-    foreach ($shippingData as $ship) {
-        if ($ship['Status'] === 'Delayed') {
-            $delayed++;
-        }
-    }
-    $delayRate = $totalShipping > 0 ? round(($delayed / $totalShipping) * 100, 1) : 0;
-
-    // CHART DATA CALCULATIONS
-    
-    // 1. Shipment Volume Over Time (monthly aggregation)
-    $volumeSql = "SELECT 
-                    DATE_FORMAT(s.PromisedDate, '%Y-%m') as month,
-                    COUNT(*) as shipment_count
-                  FROM Shipping s
-                  JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                  JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
-    
-    if (!empty($region) || !empty($tierLevel)) {
-        $volumeSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                        LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
-    }
-    
-    $volumeSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
-    
-    if (!empty($companyID)) {
-        $volumeSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
-    }
-    if (!empty($region)) {
-        $volumeSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
-    }
-    if (!empty($tierLevel)) {
-        $volumeSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
-    }
-    
-    $volumeSql .= " GROUP BY month ORDER BY month";
-    
-    $stmtVolume = $pdo->prepare($volumeSql);
-    $stmtVolume->execute($whereParams);
-    $volumeData = $stmtVolume->fetchAll();
-    
-    // 2. On-Time Delivery Rate Over Time (monthly)
-    $onTimeRateSql = "SELECT 
-                        DATE_FORMAT(s.PromisedDate, '%Y-%m') as month,
-                        COUNT(*) as total,
-                        SUM(CASE WHEN s.ActualDate IS NOT NULL AND s.ActualDate <= s.PromisedDate THEN 1 ELSE 0 END) as onTime
-                      FROM Shipping s
-                      JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                      JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
-    
-    if (!empty($region) || !empty($tierLevel)) {
-        $onTimeRateSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                            LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
-    }
-    
-    $onTimeRateSql .= " WHERE s.PromisedDate BETWEEN :start AND :end AND s.ActualDate IS NOT NULL";
-    
-    if (!empty($companyID)) {
-        $onTimeRateSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
-    }
-    if (!empty($region)) {
-        $onTimeRateSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
-    }
-    if (!empty($tierLevel)) {
-        $onTimeRateSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
-    }
-    
-    $onTimeRateSql .= " GROUP BY month ORDER BY month";
-    
-    $stmtOnTimeRate = $pdo->prepare($onTimeRateSql);
-    $stmtOnTimeRate->execute($whereParams);
-    $onTimeRateData = $stmtOnTimeRate->fetchAll();
-    
-    // 3. Shipment Status Distribution
-    $statusSql = "SELECT 
-                    CASE 
-                        WHEN s.ActualDate IS NOT NULL THEN 'Delivered'
-                        WHEN s.PromisedDate < CURDATE() THEN 'Delayed'
-                        ELSE 'In Transit'
-                    END as status,
-                    COUNT(*) as count
-                  FROM Shipping s
-                  JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                  JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
-    
-    if (!empty($region) || !empty($tierLevel)) {
-        $statusSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                        LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
-    }
-    
-    $statusSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
-    
-    if (!empty($companyID)) {
-        $statusSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
-    }
-    if (!empty($region)) {
-        $statusSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
-    }
-    if (!empty($tierLevel)) {
-        $statusSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
-    }
-    
-    $statusSql .= " GROUP BY status";
-    
-    $stmtStatus = $pdo->prepare($statusSql);
-    $stmtStatus->execute($whereParams);
-    $statusData = $stmtStatus->fetchAll();
-    
-    // 4. Top Products Handled (by volume)
-    $productsSql = "SELECT 
-                        p.ProductName,
-                        p.Category,
-                        COUNT(*) as shipment_count,
-                        SUM(s.Quantity) as total_quantity
-                    FROM Shipping s
-                    JOIN Product p ON s.ProductID = p.ProductID
-                    JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                    JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
-    
-    if (!empty($region) || !empty($tierLevel)) {
-        $productsSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                          LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
-    }
-    
-    $productsSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
-    
-    if (!empty($companyID)) {
-        $productsSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
-    }
-    if (!empty($region)) {
-        $productsSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
-    }
-    if (!empty($tierLevel)) {
-        $productsSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
-    }
-    
-    $productsSql .= " GROUP BY p.ProductID, p.ProductName, p.Category 
-                      ORDER BY total_quantity DESC 
-                      LIMIT 10";
-    
-    $stmtProducts = $pdo->prepare($productsSql);
-    $stmtProducts->execute($whereParams);
-    $productsData = $stmtProducts->fetchAll();
-    
-    // 5. Disruption Exposure Score (total disruptions + 2 * high impact events)
-    $disruptionSql = "SELECT 
-                        DATE_FORMAT(de.EventDate, '%Y-%m') as month,
-                        COUNT(DISTINCT de.EventID) as total_disruptions,
-                        SUM(CASE WHEN ic.ImpactLevel = 'High' THEN 1 ELSE 0 END) as high_impact
-                      FROM DisruptionEvent de
-                      LEFT JOIN ImpactsCompany ic ON de.EventID = ic.EventID";
-    
-    if (!empty($companyID) || !empty($region) || !empty($tierLevel)) {
-        $disruptionSql .= " LEFT JOIN Company c ON ic.AffectedCompanyID = c.CompanyID";
-        
-        if (!empty($region) || !empty($tierLevel)) {
-            $disruptionSql .= " LEFT JOIN Location loc ON c.LocationID = loc.LocationID";
-        }
-    }
-    
-    $disruptionSql .= " WHERE de.EventDate BETWEEN :start AND :end";
-    
-    if (!empty($companyID)) {
-        $disruptionSql .= " AND ic.AffectedCompanyID = :companyID";
-    }
-    if (!empty($region)) {
-        $disruptionSql .= " AND loc.ContinentName = :region";
-    }
-    if (!empty($tierLevel)) {
-        $disruptionSql .= " AND c.TierLevel = :tier";
-    }
-    
-    $disruptionSql .= " GROUP BY month ORDER BY month";
-    
-    $stmtDisruption = $pdo->prepare($disruptionSql);
-    $stmtDisruption->execute($whereParams);
-    $disruptionData = $stmtDisruption->fetchAll();
-    
-    // Calculate disruption exposure scores
-    foreach ($disruptionData as &$row) {
-        $row['exposure_score'] = intval($row['total_disruptions']) + (2 * intval($row['high_impact']));
-    }
-    unset($row);
-
-    // AJAX response
-    if (isset($_GET['ajax'])) {
-        header('Content-Type: application/json');
-        echo json_encode(array(
-            'success' => true,
-            'data' => array(
-                'shipping' => $shippingData,
-                'receiving' => $receivingData,
-                'adjustments' => $adjustmentsData,
-                'metrics' => array(
-                    'totalTransactions' => $totalTransactions,
-                    'totalShipping' => $totalShipping,
-                    'totalReceiving' => $totalReceiving,
-                    'totalAdjustments' => $totalAdjustments,
-                    'delayed' => $delayed,
-                    'delayRate' => $delayRate
-                ),
-                'charts' => array(
-                    'volume' => $volumeData,
-                    'onTimeRate' => $onTimeRateData,
-                    'status' => $statusData,
-                    'products' => $productsData,
-                    'disruption' => $disruptionData
-                ),
-                'pagination' => array(
-                    'shipping' => array(
-                        'currentPage' => $shippingPage,
-                        'totalPages' => $shippingTotalPages,
-                        'totalRecords' => $shippingTotal,
-                        'pageSize' => $pageSize
-                    ),
-                    'receiving' => array(
-                        'currentPage' => $receivingPage,
-                        'totalPages' => $receivingTotalPages,
-                        'totalRecords' => $receivingTotal,
-                        'pageSize' => $pageSize
-                    ),
-                    'adjustments' => array(
-                        'currentPage' => $adjustmentsPage,
-                        'totalPages' => $adjustmentsTotalPages,
-                        'totalRecords' => $adjustmentsTotal,
-                        'pageSize' => $pageSize
-                    )
-                )
-            )
-        ));
-        exit;
-    }
-
-    // Get all companies and regions for the dropdowns (only needed on initial page load)
-    $allCompanies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName")->fetchAll();
-    $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentName")->fetchAll();
-
-} catch (Exception $e) {
-    if (isset($_GET['ajax'])) {
-        header('Content-Type: application/json');
-        echo json_encode(array('success' => false, 'error' => $e->getMessage()));
-        exit;
-    }
-    die("Database error: " . $e->getMessage());
+if (!empty($companyID)) {
+    $where[] = "(s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
+    $params[':companyID'] = $companyID;
 }
+
+if (!empty($companyType)) {
+    $where[] = "(source.Type = :companyType OR dest.Type = :companyType)";
+    $params[':companyType'] = $companyType;
+}
+
+// Add JOINs for region and tier filtering
+if (!empty($region) || !empty($tierLevel)) {
+    $joins = " LEFT JOIN Location srcLoc ON source.LocationID = srcLoc.LocationID
+               LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
+    
+    if (!empty($region)) {
+        $where[] = "(srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
+        $params[':region'] = $region;
+    }
+    
+    if (!empty($tierLevel)) {
+        $where[] = "(source.TierLevel = :tier OR dest.TierLevel = :tier)";
+        $params[':tier'] = $tierLevel;
+    }
+}
+
+$whereClause = 'WHERE ' . implode(' AND ', $where);
+
+// Main query: get transaction costs with details
+$sql = "SELECT 
+            s.ShipmentID,
+            s.PromisedDate,
+            s.ActualDate,
+            s.Quantity,
+            p.ProductName,
+            p.Category,
+            source.CompanyName as SourceCompany,
+            dest.CompanyName as DestCompany,
+            (s.Quantity * 2.5) as shippingCost,
+            CASE 
+                WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                ELSE 0 
+            END as delayPenalty,
+            (s.Quantity * 2.5) + 
+            CASE 
+                WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                ELSE 0 
+            END as totalCost
+        FROM Shipping s
+        JOIN Product p ON s.ProductID = p.ProductID
+        JOIN Company source ON s.SourceCompanyID = source.CompanyID
+        JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
+        $joins
+        $whereClause
+        ORDER BY s.PromisedDate DESC";
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$transactions = $stmt->fetchAll();
+
+// Summary calculations
+$summarySql = "SELECT 
+                SUM(s.Quantity * 2.5) as totalShippingCost,
+                SUM(CASE 
+                    WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                    THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                    ELSE 0 
+                END) as totalDelayPenalty,
+                SUM((s.Quantity * 2.5) + 
+                    CASE 
+                        WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                        THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                        ELSE 0 
+                    END) as totalCost,
+                AVG((s.Quantity * 2.5) + 
+                    CASE 
+                        WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                        THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                        ELSE 0 
+                    END) as avgCostPerShipment,
+                MAX((s.Quantity * 2.5) + 
+                    CASE 
+                        WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                        THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                        ELSE 0 
+                    END) as maxCost,
+                SUM(CASE 
+                    WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                    THEN 1 
+                    ELSE 0 
+                END) as delayedCount
+            FROM Shipping s
+            JOIN Product p ON s.ProductID = p.ProductID
+            JOIN Company source ON s.SourceCompanyID = source.CompanyID
+            JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
+            $joins
+            $whereClause";
+
+$summaryStmt = $pdo->prepare($summarySql);
+$summaryStmt->execute($params);
+$summary = $summaryStmt->fetch();
+
+$totalShippingCost = floatval($summary['totalShippingCost']);
+$totalDelayPenalty = floatval($summary['totalDelayPenalty']);
+$totalCost = floatval($summary['totalCost']);
+$avgCostPerShipment = floatval($summary['avgCostPerShipment']);
+$maxCost = floatval($summary['maxCost']);
+$delayedCount = intval($summary['delayedCount']);
+
+// Cost breakdown by category
+$categorySql = "SELECT 
+                    p.Category,
+                    COUNT(DISTINCT s.ShipmentID) as shipmentCount,
+                    SUM(s.Quantity * 2.5) as categoryShippingCost,
+                    SUM(CASE 
+                        WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                        THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                        ELSE 0 
+                    END) as categoryDelayPenalty
+                FROM Shipping s
+                JOIN Product p ON s.ProductID = p.ProductID
+                JOIN Company source ON s.SourceCompanyID = source.CompanyID
+                JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
+                $joins
+                $whereClause
+                GROUP BY p.Category
+                ORDER BY categoryShippingCost DESC";
+
+$stmt2 = $pdo->prepare($categorySql);
+$stmt2->execute($params);
+$categoryBreakdown = $stmt2->fetchAll();
+
+// Cost trend over time (monthly aggregation)
+$trendSql = "SELECT 
+                DATE_FORMAT(s.PromisedDate, '%Y-%m') as month,
+                SUM(s.Quantity * 2.5) as monthlyShipping,
+                SUM(CASE 
+                    WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                    THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                    ELSE 0 
+                END) as monthlyPenalty
+             FROM Shipping s
+             JOIN Company source ON s.SourceCompanyID = source.CompanyID
+             JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
+             $joins
+             $whereClause
+             GROUP BY month
+             ORDER BY month ASC";
+
+$stmt3 = $pdo->prepare($trendSql);
+$stmt3->execute($params);
+$costTrend = $stmt3->fetchAll();
+
+// NEW CHART: Cost by Region
+$regionSql = "SELECT 
+                COALESCE(srcLoc.ContinentName, 'Unknown') as region,
+                SUM(s.Quantity * 2.5) as regionShippingCost,
+                SUM(CASE 
+                    WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                    THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                    ELSE 0 
+                END) as regionDelayPenalty,
+                COUNT(DISTINCT s.ShipmentID) as shipmentCount
+              FROM Shipping s
+              JOIN Product p ON s.ProductID = p.ProductID
+              JOIN Company source ON s.SourceCompanyID = source.CompanyID
+              JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
+              LEFT JOIN Location srcLoc ON source.LocationID = srcLoc.LocationID
+              LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID
+              $whereClause
+              GROUP BY srcLoc.ContinentName
+              ORDER BY regionShippingCost DESC";
+
+$stmtRegion = $pdo->prepare($regionSql);
+$stmtRegion->execute($params);
+$regionBreakdown = $stmtRegion->fetchAll();
+
+// NEW CHART: Cost by Tier Level
+$tierSql = "SELECT 
+                CAST(CONCAT('Tier ', source.TierLevel) AS CHAR CHARACTER SET utf8mb4) as tier,
+                SUM(s.Quantity * 2.5) as tierShippingCost,
+                SUM(CASE 
+                    WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                    THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                    ELSE 0 
+                END) as tierDelayPenalty,
+                COUNT(DISTINCT s.ShipmentID) as shipmentCount
+            FROM Shipping s
+            JOIN Product p ON s.ProductID = p.ProductID
+            JOIN Company source ON s.SourceCompanyID = source.CompanyID
+            JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
+            $joins
+            $whereClause
+            GROUP BY source.TierLevel
+            ORDER BY source.TierLevel";
+
+$stmtTier = $pdo->prepare($tierSql);
+$stmtTier->execute($params);
+$tierBreakdown = $stmtTier->fetchAll();
+
+// NEW CHART: Top 10 Most Expensive Routes
+$routeSql = "SELECT 
+                CONCAT(CAST(source.CompanyName AS CHAR CHARACTER SET utf8mb4), ' → ', CAST(dest.CompanyName AS CHAR CHARACTER SET utf8mb4)) as route,
+                source.CompanyName as sourceCompany,
+                dest.CompanyName as destCompany,
+                COUNT(DISTINCT s.ShipmentID) as shipmentCount,
+                SUM((s.Quantity * 2.5) + 
+                    CASE 
+                        WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate 
+                        THEN DATEDIFF(s.ActualDate, s.PromisedDate) * 10
+                        ELSE 0 
+                    END) as routeTotalCost
+             FROM Shipping s
+             JOIN Product p ON s.ProductID = p.ProductID
+             JOIN Company source ON s.SourceCompanyID = source.CompanyID
+             JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID
+             $joins
+             $whereClause
+             GROUP BY source.CompanyID, dest.CompanyID, source.CompanyName, dest.CompanyName
+             ORDER BY routeTotalCost DESC
+             LIMIT 10";
+
+$stmtRoute = $pdo->prepare($routeSql);
+$stmtRoute->execute($params);
+$routeBreakdown = $stmtRoute->fetchAll();
+
+// AJAX response
+if (isset($_GET['ajax'])) {
+    header('Content-Type: application/json');
+    echo json_encode(array(
+        'success' => true,
+        'data' => array(
+            'summary' => array(
+                'totalShippingCost' => $totalShippingCost,
+                'totalDelayPenalty' => $totalDelayPenalty,
+                'totalCost' => $totalCost,
+                'avgCostPerShipment' => $avgCostPerShipment,
+                'maxCost' => $maxCost,
+                'delayedCount' => $delayedCount
+            ),
+            'charts' => array(
+                'category' => $categoryBreakdown,
+                'trend' => $costTrend,
+                'region' => $regionBreakdown,
+                'tier' => $tierBreakdown,
+                'route' => $routeBreakdown
+            )
+        )
+    ));
+    exit;
+}
+
+// Get companies and regions for dropdowns
+$companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName")->fetchAll();
+$regions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentName")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Transactions - SCM</title>
+    <title>Cost Analysis - SCM</title>
     <link rel="stylesheet" href="../assets/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }
         .metric-card { background: rgba(0,0,0,0.6); padding: 20px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); text-align: center; transition: all 0.3s; }
         .metric-card:hover { border-color: var(--purdue-gold); transform: translateY(-2px); }
-        .metric-card h3 { margin: 0; font-size: 2rem; color: var(--purdue-gold); }
-        .metric-card p { margin: 8px 0 0 0; color: var(--text-light); font-size: 0.9rem; }
-        
-        .tab-navigation {
-            display: flex;
-            gap: 10px;
-            margin: 30px 0 20px 0;
-            border-bottom: 2px solid rgba(207,185,145,0.3);
-        }
-        .tab-btn {
-            padding: 12px 24px;
-            background: rgba(0,0,0,0.4);
-            border: none;
-            border-bottom: 3px solid transparent;
-            color: var(--text-light);
-            cursor: pointer;
-            font-size: 1rem;
-            transition: all 0.3s;
-        }
-        .tab-btn:hover {
-            background: rgba(207,185,145,0.2);
-            color: white;
-        }
-        .tab-btn.active {
-            background: rgba(207,185,145,0.2);
-            border-bottom-color: var(--purdue-gold);
+        .metric-card h3 { 
+            margin: 0; 
+            font-size: clamp(1rem, 4vw, 1.6em); 
             color: var(--purdue-gold);
-            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
+        .metric-card p { margin: 8px 0 0 0; color: var(--text-light); font-size: 1rem; }
         
-        .tab-content {
-            display: none;
-        }
-        .tab-content.active {
-            display: block;
-        }
+        .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; margin: 30px 0; }
+        .chart-container { background: rgba(0,0,0,0.6); padding: 24px; border-radius: 12px; border: 2px solid rgba(207,185,145,0.3); }
+        .chart-wrapper { position: relative; height: 350px; }
         
-        .table-scroll-wrapper {
-            max-height: 600px;
-            overflow-y: auto;
-            overflow-x: auto;
-            border: 2px solid rgba(207,185,145,0.3);
-            border-radius: 8px;
-            background: rgba(0,0,0,0.3);
-            margin-top: 20px;
-        }
-        .table-scroll-wrapper::-webkit-scrollbar { width: 12px; height: 12px; }
-        .table-scroll-wrapper::-webkit-scrollbar-track { background: rgba(0,0,0,0.5); border-radius: 6px; }
-        .table-scroll-wrapper::-webkit-scrollbar-thumb { background: #CFB991; border-radius: 6px; }
-        .table-scroll-wrapper::-webkit-scrollbar-thumb:hover { background: #b89968; }
-        
-        table { width: 100%; border-collapse: collapse; }
-        thead { position: sticky; top: 0; background: rgba(0,0,0,0.9); z-index: 10; }
-        th { padding: 12px; text-align: left; color: var(--purdue-gold); font-weight: bold; border-bottom: 2px solid var(--purdue-gold); white-space: nowrap; }
-        td { padding: 10px 12px; border-bottom: 1px solid rgba(207,185,145,0.1); color: var(--text-light); }
-        tbody tr:hover { background: rgba(207,185,145,0.1); }
-        
-        .status-badge {
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.85rem;
-            font-weight: bold;
-            display: inline-block;
-        }
-        .status-delivered { background: #4caf50; color: white; }
-        .status-delayed { background: #f44336; color: white; }
-        .status-in { background: #2196f3; color: white; }
-        .status-intransit { background: #2196f3; color: white; }
-        
-        .type-badge {
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.85rem;
-            font-weight: bold;
-            display: inline-block;
-        }
-        .type-restock { background: #4caf50; color: white; }
-        .type-adjustment { background: #9c27b0; color: white; }
-        
-        .delayed-count { color: #f44336; font-weight: bold; }
+        .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 20px; }
         
         .content-section {
             background: rgba(0,0,0,0.6);
@@ -642,76 +321,6 @@ try {
         .content-section h3 {
             margin-top: 0;
             color: var(--purdue-gold);
-        }
-        
-        .pagination-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
-            background: rgba(0,0,0,0.4);
-            border-top: 2px solid rgba(207,185,145,0.3);
-            margin-top: 10px;
-        }
-        
-        .pagination-info {
-            color: var(--text-light);
-            font-size: 0.9rem;
-        }
-        
-        .pagination-buttons {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .page-btn {
-            padding: 8px 16px;
-            background: rgba(207,185,145,0.2);
-            border: 1px solid var(--purdue-gold);
-            color: var(--purdue-gold);
-            cursor: pointer;
-            border-radius: 4px;
-            font-size: 0.9rem;
-            transition: all 0.3s;
-        }
-        
-        .page-btn:hover:not(:disabled) {
-            background: var(--purdue-gold);
-            color: black;
-        }
-        
-        .page-btn:disabled {
-            opacity: 0.3;
-            cursor: not-allowed;
-        }
-        
-        .charts-section {
-            margin: 30px 0;
-        }
-        
-        .charts-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-            gap: 20px;
-            margin: 20px 0;
-        }
-        
-        .chart-card {
-            background: rgba(0,0,0,0.6);
-            padding: 20px;
-            border-radius: 12px;
-            border: 2px solid rgba(207,185,145,0.3);
-        }
-        
-        .chart-card h3 {
-            margin: 0 0 15px 0;
-            color: var(--purdue-gold);
-            font-size: 1.1rem;
-        }
-        
-        .chart-wrapper {
-            position: relative;
-            height: 300px;
         }
     </style>
 </head>
@@ -731,61 +340,70 @@ try {
         <a href="companies.php">Companies</a>
         <a href="kpis.php">KPIs</a>
         <a href="disruptions.php">Disruptions</a>
-        <a href="transactions.php" class="active">Transactions</a>
-        <a href="transaction_costs.php">Cost Analysis</a>
+        <a href="transactions.php">Transactions</a>
+        <a href="transaction_costs.php" class="active">Cost Analysis</a>
         <a href="distributors.php">Distributors</a>
     </nav>
 
     <div class="container">
-        <h2>All Transactions</h2>
+        <h2>Transaction Cost Analysis</h2>
 
-        <!-- Date Filter -->
+        <!-- Filters -->
         <div class="content-section">
-            <h3>Filter Transactions</h3>
+            <h3>Filter Options</h3>
             <form id="filterForm">
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                <div class="filter-grid">
                     <div>
                         <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Start Date:</label>
-                        <input type="date" id="start_date" value="<?php echo $startDate ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                        <input type="date" id="start_date" value="<?php echo $startDate ?>" required style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
                     </div>
                     <div>
                         <label style="color: var(--text-light); display: block; margin-bottom: 5px;">End Date:</label>
-                        <input type="date" id="end_date" value="<?php echo $endDate ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                        <input type="date" id="end_date" value="<?php echo $endDate ?>" required style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
                     </div>
                     <div>
                         <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Company (Optional):</label>
-                        <select id="company_id" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                        <select id="company_id" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
                             <option value="">All Companies</option>
-                            <?php foreach ($allCompanies as $c): ?>
-                                <option value="<?= $c['CompanyID'] ?>" <?= $companyID == $c['CompanyID'] ? 'selected' : '' ?>>
-                                    <?= htmlspecialchars($c['CompanyName']) ?>
+                            <?php foreach ($companies as $c): ?>
+                                <option value="<?php echo $c['CompanyID'] ?>" <?php echo $companyID == $c['CompanyID'] ? 'selected' : '' ?>>
+                                    <?php echo htmlspecialchars($c['CompanyName']) ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Company Type (Optional):</label>
+                        <select id="company_type" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                            <option value="">All Types</option>
+                            <option value="Manufacturer" <?php echo $companyType == 'Manufacturer' ? 'selected' : '' ?>>Manufacturer</option>
+                            <option value="Distributor" <?php echo $companyType == 'Distributor' ? 'selected' : '' ?>>Distributor</option>
+                            <option value="Retailer" <?php echo $companyType == 'Retailer' ? 'selected' : '' ?>>Retailer</option>
+                        </select>
+                    </div>
+                    <div>
                         <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Region (Optional):</label>
-                        <select id="region" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                        <select id="region" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
                             <option value="">All Regions</option>
-                            <?php foreach ($allRegions as $r): ?>
-                                <option value="<?= $r['ContinentName'] ?>" <?= $region == $r['ContinentName'] ? 'selected' : '' ?>>
-                                    <?= htmlspecialchars($r['ContinentName']) ?>
+                            <?php foreach ($regions as $r): ?>
+                                <option value="<?php echo $r['ContinentName'] ?>" <?php echo $region == $r['ContinentName'] ? 'selected' : '' ?>>
+                                    <?php echo htmlspecialchars($r['ContinentName']) ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div>
                         <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Tier Level (Optional):</label>
-                        <select id="tier" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                        <select id="tier" style="padding: 8px; width: 100%; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
                             <option value="">All Tiers</option>
-                            <option value="1" <?= $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
-                            <option value="2" <?= $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
-                            <option value="3" <?= $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
+                            <option value="1" <?php echo $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
+                            <option value="2" <?php echo $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
+                            <option value="3" <?php echo $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
                         </select>
                     </div>
                 </div>
                 <div style="margin-top: 15px; display: flex; gap: 10px;">
-                    <button type="button" id="clearBtn" class="btn-secondary">Clear Filter</button>
+                    <button type="button" id="clearBtn" class="btn-secondary">Clear Filters</button>
                 </div>
             </form>
         </div>
@@ -793,133 +411,66 @@ try {
         <!-- Summary Cards -->
         <div class="metrics-grid">
             <div class="metric-card">
-                <h3 id="metric-total"><?php echo number_format($totalTransactions) ?></h3>
-                <p>Total Transactions</p>
+                <h3 id="metric-total">$<?php echo number_format($totalCost, 2) ?></h3>
+                <p>Total Cost</p>
             </div>
             <div class="metric-card">
-                <h3 id="metric-shipping"><?php echo number_format($totalShipping) ?></h3>
-                <p>Shipping Transactions</p>
+                <h3 id="metric-shipping">$<?php echo number_format($totalShippingCost, 2) ?></h3>
+                <p>Shipping Costs</p>
             </div>
             <div class="metric-card">
-                <h3 id="metric-receiving"><?php echo number_format($totalReceiving) ?></h3>
-                <p>Receiving Transactions</p>
+                <h3 style="color: #f44336;" id="metric-penalty">$<?php echo number_format($totalDelayPenalty, 2) ?></h3>
+                <p>Delay Penalties</p>
             </div>
             <div class="metric-card">
-                <h3 id="metric-adjustments"><?php echo number_format($totalAdjustments) ?></h3>
-                <p>Inventory Adjustments</p>
+                <h3 id="metric-avg">$<?php echo number_format($avgCostPerShipment, 2) ?></h3>
+                <p>Avg Cost/Shipment</p>
+            </div>
+            <div class="metric-card">
+                <h3 style="color: #f44336;" id="metric-delayed"><?php echo $delayedCount ?></h3>
+                <p>Delayed Shipments</p>
             </div>
         </div>
 
-        <!-- Charts Section -->
-        <div class="charts-section">
-            <h2 style="color: var(--purdue-gold); margin-bottom: 20px;">Transaction Analytics</h2>
+        <!-- Charts -->
+        <div class="chart-grid">
+            <!-- Cost by Category -->
+            <div class="chart-container">
+                <h3 style="color: var(--purdue-gold); margin-bottom: 15px;">Cost Breakdown by Category</h3>
+                <div class="chart-wrapper">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Cost Trend Over Time -->
+            <div class="chart-container">
+                <h3 style="color: var(--purdue-gold); margin-bottom: 15px;">Cost Trend Over Time</h3>
+                <div class="chart-wrapper">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
             
-            <div class="charts-grid">
-                <!-- Shipment Volume Over Time -->
-                <div class="chart-card">
-                    <h3>Shipment Volume Over Time</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="volumeChart"></canvas>
-                    </div>
-                </div>
-                
-                <!-- On-Time Delivery Rate -->
-                <div class="chart-card">
-                    <h3>On-Time Delivery Rate Over Time</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="onTimeRateChart"></canvas>
-                    </div>
-                </div>
-                
-                <!-- Shipment Status Distribution -->
-                <div class="chart-card">
-                    <h3>Shipment Status Distribution</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="statusChart"></canvas>
-                    </div>
-                </div>
-                
-                <!-- Top Products Handled -->
-                <div class="chart-card">
-                    <h3>Top 10 Products by Volume</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="productsChart"></canvas>
-                    </div>
-                </div>
-                
-                <!-- Disruption Exposure Score -->
-                <div class="chart-card" style="grid-column: span 2;">
-                    <h3>Disruption Exposure Score (Disruptions + 2×High Impact)</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="disruptionChart"></canvas>
-                    </div>
+            <!-- Cost by Region -->
+            <div class="chart-container">
+                <h3 style="color: var(--purdue-gold); margin-bottom: 15px;">Cost Breakdown by Region</h3>
+                <div class="chart-wrapper">
+                    <canvas id="regionChart"></canvas>
                 </div>
             </div>
-        </div>
-
-        <!-- Tab Navigation -->
-        <div class="tab-navigation">
-            <button class="tab-btn active" data-tab="shipping">
-                Shipping (<span id="tab-count-shipping"><?php echo number_format($totalShipping) ?></span>)
-            </button>
-            <button class="tab-btn" data-tab="receiving">
-                Receiving (<span id="tab-count-receiving"><?php echo number_format($totalReceiving) ?></span>)
-            </button>
-            <button class="tab-btn" data-tab="adjustments">
-                Adjustments (<span id="tab-count-adjustments"><?php echo number_format($totalAdjustments) ?></span>)
-            </button>
-        </div>
-
-        <!-- Shipping Tab -->
-        <div id="tab-shipping" class="tab-content active">
-            <div class="content-section">
-                <h3>Shipping Transactions</h3>
-                <div class="table-scroll-wrapper" id="shipping-table-container">
-                    <!-- Content will be populated by JavaScript -->
-                </div>
-                <div class="pagination-controls" id="shipping-pagination">
-                    <div class="pagination-info" id="shipping-page-info"></div>
-                    <div class="pagination-buttons">
-                        <button class="page-btn" id="shipping-prev-btn" onclick="changePage('shipping', -1)">← Previous</button>
-                        <button class="page-btn" id="shipping-next-btn" onclick="changePage('shipping', 1)">Next →</button>
-                    </div>
+            
+            <!-- Cost by Tier Level -->
+            <div class="chart-container">
+                <h3 style="color: var(--purdue-gold); margin-bottom: 15px;">Cost Breakdown by Tier Level</h3>
+                <div class="chart-wrapper">
+                    <canvas id="tierChart"></canvas>
                 </div>
             </div>
-        </div>
-
-        <!-- Receiving Tab -->
-        <div id="tab-receiving" class="tab-content">
-            <div class="content-section">
-                <h3>Receiving Transactions</h3>
-                <div class="table-scroll-wrapper" id="receiving-table-container">
-                    <!-- Content will be populated by JavaScript -->
-                </div>
-                <div class="pagination-controls" id="receiving-pagination">
-                    <div class="pagination-info" id="receiving-page-info"></div>
-                    <div class="pagination-buttons">
-                        <button class="page-btn" id="receiving-prev-btn" onclick="changePage('receiving', -1)">← Previous</button>
-                        <button class="page-btn" id="receiving-next-btn" onclick="changePage('receiving', 1)">Next →</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Adjustments Tab -->
-        <div id="tab-adjustments" class="tab-content">
-            <div class="content-section">
-                <h3>Inventory Adjustments</h3>
-                <p style="color: rgba(255,255,255,0.6); margin-bottom: 15px;">
-                    Showing 500 adjustments per page in selected date range
-                </p>
-                <div class="table-scroll-wrapper" id="adjustments-table-container">
-                    <!-- Content will be populated by JavaScript -->
-                </div>
-                <div class="pagination-controls" id="adjustments-pagination">
-                    <div class="pagination-info" id="adjustments-page-info"></div>
-                    <div class="pagination-buttons">
-                        <button class="page-btn" id="adjustments-prev-btn" onclick="changePage('adjustments', -1)">← Previous</button>
-                        <button class="page-btn" id="adjustments-next-btn" onclick="changePage('adjustments', 1)">Next →</button>
-                    </div>
+            
+            <!-- Top 10 Most Expensive Routes -->
+            <div class="chart-container" style="grid-column: span 2;">
+                <h3 style="color: var(--purdue-gold); margin-bottom: 15px;">Top 10 Most Expensive Routes</h3>
+                <div class="chart-wrapper">
+                    <canvas id="routeChart"></canvas>
                 </div>
             </div>
         </div>
@@ -927,42 +478,31 @@ try {
 
     <script>
     (function() {
-        var currentTab = 'shipping';
-        var pages = {
-            shipping: 1,
-            receiving: 1,
-            adjustments: 1
-        };
-        var paginationData = null;
-        
         // Chart instances
         var charts = {
-            volume: null,
-            onTimeRate: null,
-            status: null,
-            products: null,
-            disruption: null
+            category: null,
+            trend: null,
+            region: null,
+            tier: null,
+            route: null
         };
         
-        // Load transaction data via AJAX
-        function loadTransactions() {
+        // Load cost data via AJAX
+        function loadCostData() {
             var params = 'ajax=1&start_date=' + encodeURIComponent(document.getElementById('start_date').value) +
                         '&end_date=' + encodeURIComponent(document.getElementById('end_date').value) +
                         '&company_id=' + encodeURIComponent(document.getElementById('company_id').value) +
+                        '&company_type=' + encodeURIComponent(document.getElementById('company_type').value) +
                         '&region=' + encodeURIComponent(document.getElementById('region').value) +
-                        '&tier=' + encodeURIComponent(document.getElementById('tier').value) +
-                        '&shipping_page=' + pages.shipping +
-                        '&receiving_page=' + pages.receiving +
-                        '&adjustments_page=' + pages.adjustments;
+                        '&tier=' + encodeURIComponent(document.getElementById('tier').value);
             
             var xhr = new XMLHttpRequest();
-            xhr.open('GET', 'transactions.php?' + params, true);
+            xhr.open('GET', 'transaction_costs.php?' + params, true);
             xhr.onload = function() {
                 if (xhr.status === 200) {
                     var response = JSON.parse(xhr.responseText);
                     if (response.success) {
-                        paginationData = response.data.pagination;
-                        updateDisplay(response.data);
+                        updateSummary(response.data.summary);
                         updateCharts(response.data.charts);
                     }
                 }
@@ -970,247 +510,200 @@ try {
             xhr.send();
         }
         
-        // Change page for a specific tab
-        window.changePage = function(tab, direction) {
-            pages[tab] = Math.max(1, pages[tab] + direction);
-            loadTransactions();
-        };
-        
-        function updateDisplay(data) {
-            // Update metrics
-            document.getElementById('metric-total').textContent = formatNumber(data.metrics.totalTransactions);
-            document.getElementById('metric-shipping').textContent = formatNumber(data.metrics.totalShipping);
-            document.getElementById('metric-receiving').textContent = formatNumber(data.metrics.totalReceiving);
-            document.getElementById('metric-adjustments').textContent = formatNumber(data.metrics.totalAdjustments);
-            
-            // Update tab counts
-            document.getElementById('tab-count-shipping').textContent = formatNumber(data.metrics.totalShipping);
-            document.getElementById('tab-count-receiving').textContent = formatNumber(data.metrics.totalReceiving);
-            document.getElementById('tab-count-adjustments').textContent = formatNumber(data.metrics.totalAdjustments);
-            
-            // Update tables
-            renderShippingTable(data.shipping);
-            renderReceivingTable(data.receiving);
-            renderAdjustmentsTable(data.adjustments);
+        function updateSummary(summary) {
+            document.getElementById('metric-total').textContent = '$' + formatCurrency(summary.totalCost);
+            document.getElementById('metric-shipping').textContent = '$' + formatCurrency(summary.totalShippingCost);
+            document.getElementById('metric-penalty').textContent = '$' + formatCurrency(summary.totalDelayPenalty);
+            document.getElementById('metric-avg').textContent = '$' + formatCurrency(summary.avgCostPerShipment);
+            document.getElementById('metric-delayed').textContent = summary.delayedCount;
         }
         
-        function renderShippingTable(data) {
-            var container = document.getElementById('shipping-table-container');
-            
-            if (data.length === 0) {
-                container.innerHTML = '<p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">No shipping transactions found in selected date range.</p>';
-                updatePaginationControls('shipping');
-                return;
-            }
-            
-            var html = '<table><thead><tr>' +
-                '<th>Shipment ID</th><th>Product</th><th>Category</th><th>Source</th><th>Destination</th>' +
-                '<th>Distributor</th><th>Quantity</th><th>Promised Date</th><th>Actual Date</th><th>Status</th>' +
-                '</tr></thead><tbody>';
-            
-            data.forEach(function(row) {
-                var statusClass = row.Status.toLowerCase().replace(/\s+/g, '');
-                html += '<tr>' +
-                    '<td>' + row.ShipmentID + '</td>' +
-                    '<td>' + escapeHtml(row.ProductName) + '</td>' +
-                    '<td>' + escapeHtml(row.Category) + '</td>' +
-                    '<td>' + escapeHtml(row.SourceCompany) + '</td>' +
-                    '<td>' + escapeHtml(row.DestCompany) + '</td>' +
-                    '<td>' + (row.DistributorName ? escapeHtml(row.DistributorName) : 'Direct') + '</td>' +
-                    '<td>' + formatNumber(row.Quantity) + '</td>' +
-                    '<td>' + row.PromisedDate + '</td>' +
-                    '<td>' + (row.ActualDate || '-') + '</td>' +
-                    '<td><span class="status-badge status-' + statusClass + '">' + escapeHtml(row.Status) + '</span></td>' +
-                    '</tr>';
-            });
-            
-            html += '</tbody></table>';
-            container.innerHTML = html;
-            updatePaginationControls('shipping');
-        }
-        
-        function renderReceivingTable(data) {
-            var container = document.getElementById('receiving-table-container');
-            
-            if (data.length === 0) {
-                container.innerHTML = '<p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">No receiving transactions found in selected date range.</p>';
-                updatePaginationControls('receiving');
-                return;
-            }
-            
-            var html = '<table><thead><tr>' +
-                '<th>Receiving ID</th><th>Product</th><th>Category</th><th>Source Company</th>' +
-                '<th>Receiver Company</th><th>Quantity Received</th><th>Received Date</th>' +
-                '</tr></thead><tbody>';
-            
-            data.forEach(function(row) {
-                html += '<tr>' +
-                    '<td>' + row.ReceivingID + '</td>' +
-                    '<td>' + escapeHtml(row.ProductName) + '</td>' +
-                    '<td>' + escapeHtml(row.Category) + '</td>' +
-                    '<td>' + escapeHtml(row.SourceCompany) + '</td>' +
-                    '<td>' + escapeHtml(row.ReceiverCompany) + '</td>' +
-                    '<td>' + formatNumber(row.QuantityReceived) + '</td>' +
-                    '<td>' + row.ReceivedDate + '</td>' +
-                    '</tr>';
-            });
-            
-            html += '</tbody></table>';
-            container.innerHTML = html;
-            updatePaginationControls('receiving');
-        }
-        
-        function renderAdjustmentsTable(data) {
-            var container = document.getElementById('adjustments-table-container');
-            
-            if (data.length === 0) {
-                container.innerHTML = '<p style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">No inventory adjustments found.</p>';
-                updatePaginationControls('adjustments');
-                return;
-            }
-            
-            var html = '<table><thead><tr>' +
-                '<th>Adjustment ID</th><th>Date</th><th>Company</th><th>Product</th><th>Category</th>' +
-                '<th>Type</th><th>Quantity Change</th><th>Reason</th>' +
-                '</tr></thead><tbody>';
-            
-            data.forEach(function(row) {
-                var typeClass = row.Type.toLowerCase();
-                var changeColor = row.QuantityChange > 0 ? '#4caf50' : '#f44336';
-                var changePrefix = row.QuantityChange > 0 ? '+' : '';
-                
-                html += '<tr>' +
-                    '<td>' + row.AdjustmentID + '</td>' +
-                    '<td>' + row.AdjustmentDate + '</td>' +
-                    '<td>' + escapeHtml(row.CompanyName) + '</td>' +
-                    '<td>' + escapeHtml(row.ProductName) + '</td>' +
-                    '<td>' + escapeHtml(row.Category) + '</td>' +
-                    '<td><span class="type-badge type-' + typeClass + '">' + escapeHtml(row.Type) + '</span></td>' +
-                    '<td style="color: ' + changeColor + '">' + changePrefix + formatNumber(row.QuantityChange) + '</td>' +
-                    '<td>' + (row.Reason ? escapeHtml(row.Reason) : '-') + '</td>' +
-                    '</tr>';
-            });
-            
-            html += '</tbody></table>';
-            container.innerHTML = html;
-            updatePaginationControls('adjustments');
-        }
-        
-        function updatePaginationControls(tab) {
-            if (!paginationData || !paginationData[tab]) return;
-            
-            var info = paginationData[tab];
-            var start = (info.currentPage - 1) * info.pageSize + 1;
-            var end = Math.min(info.currentPage * info.pageSize, info.totalRecords);
-            
-            // Update info text
-            var infoText = 'Showing ' + formatNumber(start) + '-' + formatNumber(end) + 
-                          ' of ' + formatNumber(info.totalRecords) + ' records (Page ' + 
-                          info.currentPage + ' of ' + info.totalPages + ')';
-            document.getElementById(tab + '-page-info').textContent = infoText;
-            
-            // Update button states
-            var prevBtn = document.getElementById(tab + '-prev-btn');
-            var nextBtn = document.getElementById(tab + '-next-btn');
-            
-            prevBtn.disabled = info.currentPage <= 1;
-            nextBtn.disabled = info.currentPage >= info.totalPages;
-            
-            // Hide pagination if only one page
-            var paginationDiv = document.getElementById(tab + '-pagination');
-            if (info.totalPages <= 1) {
-                paginationDiv.style.display = 'none';
-            } else {
-                paginationDiv.style.display = 'flex';
-            }
-        }
-        
-        // Update all charts with new data
         function updateCharts(chartData) {
-            // 1. Shipment Volume Chart
-            if (charts.volume) charts.volume.destroy();
-            var volumeLabels = chartData.volume.map(function(d) { return d.month; });
-            var volumeCounts = chartData.volume.map(function(d) { return parseInt(d.shipment_count); });
+            // Category Chart
+            if (charts.category) charts.category.destroy();
+            var categoryLabels = chartData.category.map(function(item) { return item.Category; });
+            var shippingCosts = chartData.category.map(function(item) { return parseFloat(item.categoryShippingCost); });
+            var penaltyCosts = chartData.category.map(function(item) { return parseFloat(item.categoryDelayPenalty); });
             
-            var ctx1 = document.getElementById('volumeChart').getContext('2d');
-            charts.volume = new Chart(ctx1, {
-                type: 'line',
+            charts.category = new Chart(document.getElementById('categoryChart'), {
+                type: 'bar',
                 data: {
-                    labels: volumeLabels,
-                    datasets: [{
-                        label: 'Shipments',
-                        data: volumeCounts,
-                        borderColor: '#CFB991',
-                        backgroundColor: 'rgba(207,185,145,0.2)',
-                        tension: 0.4,
-                        fill: true
-                    }]
+                    labels: categoryLabels,
+                    datasets: [
+                        {
+                            label: 'Shipping Cost',
+                            data: shippingCosts,
+                            backgroundColor: '#CFB991',
+                            borderColor: '#CFB991',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Delay Penalty',
+                            data: penaltyCosts,
+                            backgroundColor: '#f44336',
+                            borderColor: '#f44336',
+                            borderWidth: 1
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#CFB991' } }
+                    },
                     scales: {
-                        y: { 
-                            beginAtZero: true,
-                            ticks: { color: 'white' },
+                        x: {
+                            ticks: { color: 'rgba(255,255,255,0.7)' },
                             grid: { color: 'rgba(207,185,145,0.1)' }
                         },
-                        x: { 
-                            ticks: { color: 'white' },
+                        y: {
+                            ticks: { 
+                                color: 'rgba(255,255,255,0.7)',
+                                callback: function(value) { return '$' + value.toLocaleString(); }
+                            },
                             grid: { color: 'rgba(207,185,145,0.1)' }
                         }
-                    },
-                    plugins: { legend: { labels: { color: 'white' } } }
+                    }
                 }
             });
             
-            // 2. On-Time Delivery Rate Chart
-            if (charts.onTimeRate) charts.onTimeRate.destroy();
-            var onTimeLabels = chartData.onTimeRate.map(function(d) { return d.month; });
-            var onTimeRates = chartData.onTimeRate.map(function(d) { 
-                var total = parseInt(d.total);
-                var onTime = parseInt(d.onTime);
-                return total > 0 ? ((onTime / total) * 100).toFixed(1) : 0;
-            });
+            // Trend Chart
+            if (charts.trend) charts.trend.destroy();
+            var trendLabels = chartData.trend.map(function(item) { return item.month; });
+            var monthlyShipping = chartData.trend.map(function(item) { return parseFloat(item.monthlyShipping); });
+            var monthlyPenalty = chartData.trend.map(function(item) { return parseFloat(item.monthlyPenalty); });
+            var monthlyTotal = monthlyShipping.map(function(val, idx) { return val + monthlyPenalty[idx]; });
             
-            var ctx2 = document.getElementById('onTimeRateChart').getContext('2d');
-            charts.onTimeRate = new Chart(ctx2, {
+            charts.trend = new Chart(document.getElementById('trendChart'), {
                 type: 'line',
                 data: {
-                    labels: onTimeLabels,
+                    labels: trendLabels,
+                    datasets: [
+                        {
+                            label: 'Total Cost',
+                            data: monthlyTotal,
+                            borderColor: '#CFB991',
+                            backgroundColor: 'rgba(207,185,145,0.1)',
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'Shipping Cost',
+                            data: monthlyShipping,
+                            borderColor: '#2196f3',
+                            backgroundColor: 'rgba(33,150,243,0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'Delay Penalty',
+                            data: monthlyPenalty,
+                            borderColor: '#f44336',
+                            backgroundColor: 'rgba(244,67,54,0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#CFB991' } }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: 'rgba(255,255,255,0.7)' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        y: {
+                            ticks: { 
+                                color: 'rgba(255,255,255,0.7)',
+                                callback: function(value) { return '$' + value.toLocaleString(); }
+                            },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    }
+                }
+            });
+            
+            // Region Chart
+            if (charts.region) charts.region.destroy();
+            var regionLabels = chartData.region.map(function(item) { return item.region; });
+            var regionShipping = chartData.region.map(function(item) { return parseFloat(item.regionShippingCost); });
+            var regionPenalty = chartData.region.map(function(item) { return parseFloat(item.regionDelayPenalty); });
+            
+            charts.region = new Chart(document.getElementById('regionChart'), {
+                type: 'bar',
+                data: {
+                    labels: regionLabels,
+                    datasets: [
+                        {
+                            label: 'Shipping Cost',
+                            data: regionShipping,
+                            backgroundColor: '#CFB991'
+                        },
+                        {
+                            label: 'Delay Penalty',
+                            data: regionPenalty,
+                            backgroundColor: '#f44336'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#CFB991' } }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: 'rgba(255,255,255,0.7)' },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        },
+                        y: {
+                            ticks: { 
+                                color: 'rgba(255,255,255,0.7)',
+                                callback: function(value) { return '$' + value.toLocaleString(); }
+                            },
+                            grid: { color: 'rgba(207,185,145,0.1)' }
+                        }
+                    }
+                }
+            });
+            
+            // Tier Chart
+            if (charts.tier) charts.tier.destroy();
+            var tierLabels = chartData.tier.map(function(item) { return item.tier; });
+            var tierShipping = chartData.tier.map(function(item) { return parseFloat(item.tierShippingCost); });
+            var tierPenalty = chartData.tier.map(function(item) { return parseFloat(item.tierDelayPenalty); });
+            
+            charts.tier = new Chart(document.getElementById('tierChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: tierLabels,
                     datasets: [{
-                        label: 'On-Time %',
-                        data: onTimeRates,
-                        borderColor: '#4caf50',
-                        backgroundColor: 'rgba(76,175,80,0.2)',
-                        tension: 0.4,
-                        fill: true
+                        label: 'Total Cost',
+                        data: tierShipping.map(function(val, idx) { return val + tierPenalty[idx]; }),
+                        backgroundColor: ['#CFB991', '#2196f3', '#4caf50']
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    scales: {
-                        y: { 
-                            beginAtZero: true,
-                            max: 100,
-                            ticks: { 
-                                color: 'white',
-                                callback: function(value) { return value + '%'; }
-                            },
-                            grid: { color: 'rgba(207,185,145,0.1)' }
+                    plugins: {
+                        legend: { 
+                            labels: { color: '#CFB991' },
+                            position: 'bottom'
                         },
-                        x: { 
-                            ticks: { color: 'white' },
-                            grid: { color: 'rgba(207,185,145,0.1)' }
-                        }
-                    },
-                    plugins: { 
-                        legend: { labels: { color: 'white' } },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return context.dataset.label + ': ' + context.parsed.y + '%';
+                                    return context.label + ': $' + context.parsed.toLocaleString();
                                 }
                             }
                         }
@@ -1218,53 +711,21 @@ try {
                 }
             });
             
-            // 3. Status Distribution Chart
-            if (charts.status) charts.status.destroy();
-            var statusLabels = chartData.status.map(function(d) { return d.status; });
-            var statusCounts = chartData.status.map(function(d) { return parseInt(d.count); });
-            var statusColors = statusLabels.map(function(status) {
-                if (status === 'Delivered') return '#4caf50';
-                if (status === 'Delayed') return '#f44336';
-                return '#2196f3';
+            // Route Chart
+            if (charts.route) charts.route.destroy();
+            var routeLabels = chartData.route.map(function(item) { 
+                var label = item.route;
+                return label.length > 30 ? label.substring(0, 30) + '...' : label;
             });
+            var routeCosts = chartData.route.map(function(item) { return parseFloat(item.routeTotalCost); });
             
-            var ctx3 = document.getElementById('statusChart').getContext('2d');
-            charts.status = new Chart(ctx3, {
-                type: 'doughnut',
-                data: {
-                    labels: statusLabels,
-                    datasets: [{
-                        data: statusCounts,
-                        backgroundColor: statusColors
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { 
-                        legend: { 
-                            labels: { color: 'white' },
-                            position: 'bottom'
-                        }
-                    }
-                }
-            });
-            
-            // 4. Top Products Chart
-            if (charts.products) charts.products.destroy();
-            var productLabels = chartData.products.map(function(d) { 
-                return d.ProductName.length > 20 ? d.ProductName.substring(0, 20) + '...' : d.ProductName; 
-            });
-            var productQuantities = chartData.products.map(function(d) { return parseInt(d.total_quantity); });
-            
-            var ctx4 = document.getElementById('productsChart').getContext('2d');
-            charts.products = new Chart(ctx4, {
+            charts.route = new Chart(document.getElementById('routeChart'), {
                 type: 'bar',
                 data: {
-                    labels: productLabels,
+                    labels: routeLabels,
                     datasets: [{
-                        label: 'Total Quantity',
-                        data: productQuantities,
+                        label: 'Total Cost',
+                        data: routeCosts,
                         backgroundColor: '#CFB991'
                     }]
                 },
@@ -1272,192 +733,75 @@ try {
                     responsive: true,
                     maintainAspectRatio: false,
                     indexAxis: 'y',
+                    plugins: {
+                        legend: { labels: { color: '#CFB991' } }
+                    },
                     scales: {
-                        x: { 
-                            beginAtZero: true,
-                            ticks: { color: 'white' },
+                        x: {
+                            ticks: { 
+                                color: 'rgba(255,255,255,0.7)',
+                                callback: function(value) { return '$' + value.toLocaleString(); }
+                            },
                             grid: { color: 'rgba(207,185,145,0.1)' }
                         },
-                        y: { 
-                            ticks: { color: 'white' },
+                        y: {
+                            ticks: { color: 'rgba(255,255,255,0.7)' },
                             grid: { color: 'rgba(207,185,145,0.1)' }
                         }
-                    },
-                    plugins: { legend: { labels: { color: 'white' } } }
-                }
-            });
-            
-            // 5. Disruption Exposure Chart
-            if (charts.disruption) charts.disruption.destroy();
-            var disruptionLabels = chartData.disruption.map(function(d) { return d.month; });
-            var disruptionScores = chartData.disruption.map(function(d) { return parseInt(d.exposure_score); });
-            var totalDisruptions = chartData.disruption.map(function(d) { return parseInt(d.total_disruptions); });
-            var highImpact = chartData.disruption.map(function(d) { return parseInt(d.high_impact); });
-            
-            var ctx5 = document.getElementById('disruptionChart').getContext('2d');
-            charts.disruption = new Chart(ctx5, {
-                type: 'line',
-                data: {
-                    labels: disruptionLabels,
-                    datasets: [{
-                        label: 'Exposure Score',
-                        data: disruptionScores,
-                        borderColor: '#f44336',
-                        backgroundColor: 'rgba(244,67,54,0.2)',
-                        tension: 0.4,
-                        fill: true,
-                        yAxisID: 'y'
-                    }, {
-                        label: 'Total Disruptions',
-                        data: totalDisruptions,
-                        borderColor: '#ff9800',
-                        backgroundColor: 'rgba(255,152,0,0.2)',
-                        tension: 0.4,
-                        fill: false,
-                        yAxisID: 'y'
-                    }, {
-                        label: 'High Impact Events',
-                        data: highImpact,
-                        borderColor: '#9c27b0',
-                        backgroundColor: 'rgba(156,39,176,0.2)',
-                        tension: 0.4,
-                        fill: false,
-                        yAxisID: 'y'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: { 
-                            beginAtZero: true,
-                            position: 'left',
-                            ticks: { color: 'white' },
-                            grid: { color: 'rgba(207,185,145,0.1)' }
-                        },
-                        x: { 
-                            ticks: { color: 'white' },
-                            grid: { color: 'rgba(207,185,145,0.1)' }
-                        }
-                    },
-                    plugins: { legend: { labels: { color: 'white' } } }
+                    }
                 }
             });
         }
-        
-        // Tab switching
-        document.querySelectorAll('.tab-btn').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                var tabName = this.getAttribute('data-tab');
-                
-                // Hide all tabs
-                document.querySelectorAll('.tab-content').forEach(function(tab) {
-                    tab.classList.remove('active');
-                });
-                
-                // Remove active from all buttons
-                document.querySelectorAll('.tab-btn').forEach(function(b) {
-                    b.classList.remove('active');
-                });
-                
-                // Show selected tab
-                document.getElementById('tab-' + tabName).classList.add('active');
-                this.classList.add('active');
-                
-                currentTab = tabName;
-            });
-        });
         
         // Clear button
         document.getElementById('clearBtn').addEventListener('click', function() {
             var today = new Date();
-            var threeMonthsAgo = new Date();
-            threeMonthsAgo.setMonth(today.getMonth() - 3);
+            var sixMonthsAgo = new Date();
+            sixMonthsAgo.setMonth(today.getMonth() - 6);
             
-            document.getElementById('start_date').value = threeMonthsAgo.toISOString().split('T')[0];
+            document.getElementById('start_date').value = sixMonthsAgo.toISOString().split('T')[0];
             document.getElementById('end_date').value = today.toISOString().split('T')[0];
             document.getElementById('company_id').value = '';
+            document.getElementById('company_type').value = '';
             document.getElementById('region').value = '';
             document.getElementById('tier').value = '';
             
-            // Reset all pages to 1
-            pages.shipping = 1;
-            pages.receiving = 1;
-            pages.adjustments = 1;
-            
-            loadTransactions();
+            loadCostData();
         });
         
-        // Dynamic filter updates - reset to page 1 when filters change
-        function resetAndLoad() {
-            pages.shipping = 1;
-            pages.receiving = 1;
-            pages.adjustments = 1;
-            loadTransactions();
-        }
+        // Dynamic filter updates
+        document.getElementById('start_date').addEventListener('change', loadCostData);
+        document.getElementById('end_date').addEventListener('change', loadCostData);
+        document.getElementById('company_id').addEventListener('change', loadCostData);
+        document.getElementById('company_type').addEventListener('change', loadCostData);
+        document.getElementById('region').addEventListener('change', loadCostData);
+        document.getElementById('tier').addEventListener('change', loadCostData);
         
-        document.getElementById('start_date').addEventListener('change', resetAndLoad);
-        document.getElementById('end_date').addEventListener('change', resetAndLoad);
-        document.getElementById('company_id').addEventListener('change', resetAndLoad);
-        document.getElementById('region').addEventListener('change', resetAndLoad);
-        document.getElementById('tier').addEventListener('change', resetAndLoad);
-        
-        // Helper functions
-        function formatNumber(num) {
-            return parseInt(num).toLocaleString();
-        }
-        
-        function escapeHtml(text) {
-            var div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        // Helper function
+        function formatCurrency(value) {
+            return parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         
         // Initialize with PHP data
         (function init() {
             var initialData = {
-                shipping: <?php echo json_encode($shippingData) ?>,
-                receiving: <?php echo json_encode($receivingData) ?>,
-                adjustments: <?php echo json_encode($adjustmentsData) ?>,
-                metrics: {
-                    totalTransactions: <?php echo $totalTransactions ?>,
-                    totalShipping: <?php echo $totalShipping ?>,
-                    totalReceiving: <?php echo $totalReceiving ?>,
-                    totalAdjustments: <?php echo $totalAdjustments ?>,
-                    delayed: <?php echo $delayed ?>,
-                    delayRate: <?php echo $delayRate ?>
+                summary: {
+                    totalShippingCost: <?php echo $totalShippingCost ?>,
+                    totalDelayPenalty: <?php echo $totalDelayPenalty ?>,
+                    totalCost: <?php echo $totalCost ?>,
+                    avgCostPerShipment: <?php echo $avgCostPerShipment ?>,
+                    maxCost: <?php echo $maxCost ?>,
+                    delayedCount: <?php echo $delayedCount ?>
                 },
                 charts: {
-                    volume: <?php echo json_encode($volumeData) ?>,
-                    onTimeRate: <?php echo json_encode($onTimeRateData) ?>,
-                    status: <?php echo json_encode($statusData) ?>,
-                    products: <?php echo json_encode($productsData) ?>,
-                    disruption: <?php echo json_encode($disruptionData) ?>
-                },
-                pagination: {
-                    shipping: {
-                        currentPage: <?php echo $shippingPage ?>,
-                        totalPages: <?php echo $shippingTotalPages ?>,
-                        totalRecords: <?php echo $shippingTotal ?>,
-                        pageSize: <?php echo $pageSize ?>
-                    },
-                    receiving: {
-                        currentPage: <?php echo $receivingPage ?>,
-                        totalPages: <?php echo $receivingTotalPages ?>,
-                        totalRecords: <?php echo $receivingTotal ?>,
-                        pageSize: <?php echo $pageSize ?>
-                    },
-                    adjustments: {
-                        currentPage: <?php echo $adjustmentsPage ?>,
-                        totalPages: <?php echo $adjustmentsTotalPages ?>,
-                        totalRecords: <?php echo $adjustmentsTotal ?>,
-                        pageSize: <?php echo $pageSize ?>
-                    }
+                    category: <?php echo json_encode($categoryBreakdown) ?>,
+                    trend: <?php echo json_encode($costTrend) ?>,
+                    region: <?php echo json_encode($regionBreakdown) ?>,
+                    tier: <?php echo json_encode($tierBreakdown) ?>,
+                    route: <?php echo json_encode($routeBreakdown) ?>
                 }
             };
             
-            paginationData = initialData.pagination;
-            updateDisplay(initialData);
             updateCharts(initialData.charts);
         })();
     })();
