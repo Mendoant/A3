@@ -1,5 +1,6 @@
 <?php
 // dashboard.php - Senior Manager Dashboard
+// Main landing page for the module
 require_once '../config.php';
 requireLogin();
 
@@ -23,7 +24,7 @@ if (!hasRole('SeniorManager')) {
         <div class="container">
             <h1>Enterprise Resource Planning Portal</h1>
             <nav>
-                <span class="text-white">Welcome, <?php echo htmlspecialchars($_SESSION['FullName']); ?></span>
+                <span class="text-white">Welcome, <?= htmlspecialchars($_SESSION['FullName']) ?> (Senior Manager)</span>
                 <a href="../logout.php" class="logout-btn">Logout</a>
             </nav>
         </div>
@@ -41,60 +42,9 @@ if (!hasRole('SeniorManager')) {
         <p class="text-light">Access executive-level insights and management tools:</p>
 
         <div class="dashboard-grid">
-            <a href="financial.php" class="dashboard-card">
-                <h3>Financial Overview</h3>
-                <p>Comprehensive financial health analysis:</p>
-                <ul>
-                    <li>Average financial health by company</li>
-                    <li>Financial metrics by company type</li>
-                    <li>Regional financial performance</li>
-                    <li>Trend analysis over time</li>
-                    <li>Health score rankings</li>
-                </ul>
-                <span class="btn-link">View Financials →</span>
-            </a>
-
-            <a href="regional_disruptions.php" class="dashboard-card">
-                <h3>Regional Disruption Overview</h3>
-                <p>Geographic analysis of supply chain disruptions:</p>
-                <ul>
-                    <li>Total disruptions by region</li>
-                    <li>High-impact event tracking</li>
-                    <li>Geographic heat maps</li>
-                    <li>Regional risk assessment</li>
-                    <li>Comparative analysis</li>
-                </ul>
-                <span class="btn-link">View Regional Data →</span>
-            </a>
-
-            <a href="critical_companies.php" class="dashboard-card">
-                <h3>Critical Companies</h3>
-                <p>Identify and monitor critical supply chain nodes:</p>
-                <ul>
-                    <li>Criticality score rankings</li>
-                    <li>Downstream impact analysis</li>
-                    <li>High-impact disruption counts</li>
-                    <li>Risk concentration metrics</li>
-                    <li>Strategic importance assessment</li>
-                </ul>
-                <span class="btn-link">View Critical Companies →</span>
-            </a>
-
-            <a href="timeline.php" class="dashboard-card">
-                <h3>Disruption Timeline</h3>
-                <p>Temporal analysis of supply chain events:</p>
-                <ul>
-                    <li>Disruption frequency over time</li>
-                    <li>Trend identification</li>
-                    <li>Seasonal pattern analysis</li>
-                    <li>Historical comparisons</li>
-                    <li>Forecasting insights</li>
-                </ul>
-                <span class="btn-link">View Timeline →</span>
-            </a>
-
+            
             <a href="companies.php" class="dashboard-card">
-                <h3>Company Management</h3>
+                <h3>Company Financial Health</h3>
                 <p>Comprehensive company information and controls:</p>
                 <ul>
                     <li>View detailed company profiles</li>
@@ -105,29 +55,52 @@ if (!hasRole('SeniorManager')) {
                 <span class="btn-link">View Companies →</span>
             </a>
 
-            <a href="add_company.php" class="dashboard-card">
-                <h3>Add New Company</h3>
-                <p>Expand your supply chain network:</p>
+            <a href="financial.php" class="dashboard-card">
+                <h3>Financial Health Overview</h3>
+                <p>Comprehensive financial health analysis:</p>
                 <ul>
-                    <li>Create new company records</li>
-                    <li>Set location and type</li>
-                    <li>Define tier levels</li>
-                    <li>Establish dependencies</li>
+                    <li>Average financial health by company</li>
+                    <li>Financial metrics by company type</li>
+                    <li>Regional financial performance</li>
+                    <li>Trend analysis over time</li>
                 </ul>
-                <span class="btn-link">Add Company →</span>
+                <span class="btn-link">View Financials →</span>
             </a>
 
-            <a href="distributors.php" class="dashboard-card">
-                <h3>Distributor Rankings</h3>
-                <p>Performance metrics for logistics partners:</p>
+            <a href="critical_companies.php" class="dashboard-card">
+                <h3>Critical Companies</h3>
+                <p>Identify and monitor critical supply chain nodes:</p>
                 <ul>
-                    <li>Top distributors by volume</li>
-                    <li>Average delay analysis</li>
-                    <li>Efficiency rankings</li>
-                    <li>Detailed distributor profiles</li>
-                    <li>Performance comparisons</li>
+                    <li>Criticality score rankings</li>
+                    <li>Downstream impact analysis</li>
+                    <li>High-impact disruption counts</li>
+                    <li>Risk concentration metrics</li>
                 </ul>
-                <span class="btn-link">View Distributors →</span>
+                <span class="btn-link">View Critical Companies →</span>
+            </a>
+
+            <a href="regional_disruptions.php" class="dashboard-card">
+                <h3>Regional Disruption Overview</h3>
+                <p>Geographic analysis of supply chain disruptions:</p>
+                <ul>
+                    <li>Total disruptions by region</li>
+                    <li>High-impact event tracking</li>
+                    <li>Geographic heat maps</li>
+                    <li>Regional risk assessment</li>
+                </ul>
+                <span class="btn-link">View Regional Data →</span>
+            </a>
+
+            <a href="timeline.php" class="dashboard-card">
+                <h3>Disruption Timeline</h3>
+                <p>Temporal analysis of supply chain events:</p>
+                <ul>
+                    <li>Disruption frequency over time</li>
+                    <li>Trend identification</li>
+                    <li>Seasonal pattern analysis</li>
+                    <li>Historical comparisons</li>
+                </ul>
+                <span class="btn-link">View Timeline →</span>
             </a>
 
             <a href="disruptions.php" class="dashboard-card">
@@ -141,6 +114,31 @@ if (!hasRole('SeniorManager')) {
                 </ul>
                 <span class="btn-link">View Analysis →</span>
             </a>
+
+            <a href="distributors.php" class="dashboard-card">
+                <h3>Distributor Rankings</h3>
+                <p>Performance metrics for logistics partners:</p>
+                <ul>
+                    <li>Top distributors by volume</li>
+                    <li>Average delay analysis</li>
+                    <li>Efficiency rankings</li>
+                    <li>Detailed distributor profiles</li>
+                </ul>
+                <span class="btn-link">View Distributors →</span>
+            </a>
+
+             <a href="add_company.php" class="dashboard-card">
+                <h3>Add New Company</h3>
+                <p>Expand your supply chain network:</p>
+                <ul>
+                    <li>Create new company records</li>
+                    <li>Set location and type</li>
+                    <li>Define tier levels</li>
+                    <li>Establish dependencies</li>
+                </ul>
+                <span class="btn-link">Add Company →</span>
+            </a>
+
         </div>
     </div>
 </body>

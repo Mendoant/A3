@@ -13,122 +13,145 @@ if (!hasRole('SeniorManager')) {
 
 $pdo = getPDO();
 
-// --- 1. HANDLE AJAX REQUESTS ---
+// =================================================================
+// 1. HANDLE AJAX REQUESTS
+// =================================================================
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json');
 
     try {
-        $distributorId = isset($_GET['dist_id']) ? $_GET['dist_id'] : ''; 
-        $sortBy = isset($_GET['sort_col']) ? $_GET['sort_col'] : 'delay'; 
-        $sortDir = isset($_GET['sort_dir']) ? $_GET['sort_dir'] : 'asc'; 
+        // --- Capture Inputs ---
+        $distributorId = isset($_GET['dist_id']) ? $_GET['dist_id'] : '';
+        $region = isset($_GET['region']) ? $_GET['region'] : '';
+        $tier = isset($_GET['tier']) ? $_GET['tier'] : '';
+        $sortBy = isset($_GET['sort_col']) ? $_GET['sort_col'] : 'delay';
+        $sortDir = isset($_GET['sort_dir']) ? $_GET['sort_dir'] : 'asc';
 
         // --- SQL PARAMETER CONSTRUCTION ---
+        // We use an array for params to be safe against injection
         $finalParams = array();
         $whereClause = "WHERE 1=1";
-        
-        // Exact match for dropdown
+
+        // Filter by Distributor ID
         if ($distributorId !== '') {
             $whereClause .= " AND d.CompanyID = ?";
-            $finalParams[] = $distributorId; 
+            $finalParams[] = $distributorId;
+        }
+
+        // Filter by Region (Continent)
+        if ($region !== '') {
+            $whereClause .= " AND l.ContinentName = ?";
+            $finalParams[] = $region;
+        }
+
+        // Filter by Tier Level
+        if ($tier !== '') {
+            $whereClause .= " AND c.TierLevel = ?";
+            $finalParams[] = $tier;
         }
 
         // --- MAIN QUERY ---
-        $sql = "SELECT d.CompanyID, c.CompanyName,
+        // Calculating aggregated stats in SQL to keep PHP light
+        $sql = "SELECT d.CompanyID, c.CompanyName, c.TierLevel, l.ContinentName,
                     COUNT(s.ShipmentID) as TotalShipments,
                     SUM(CASE WHEN s.Quantity IS NOT NULL THEN s.Quantity ELSE 0 END) as TotalQuantity,
                     SUM(CASE WHEN s.ActualDate IS NOT NULL AND s.ActualDate <= s.PromisedDate THEN 1 ELSE 0 END) as OnTimeCount,
                     AVG(CASE WHEN s.ActualDate > s.PromisedDate THEN DATEDIFF(s.ActualDate, s.PromisedDate) ELSE NULL END) as AvgDelay
                 FROM Distributor d
                 JOIN Company c ON d.CompanyID = c.CompanyID
+                JOIN Location l ON c.LocationID = l.LocationID
                 LEFT JOIN Shipping s ON d.CompanyID = s.DistributorID
                 $whereClause
-                GROUP BY d.CompanyID, c.CompanyName";
+                GROUP BY d.CompanyID, c.CompanyName, c.TierLevel, l.ContinentName";
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($finalParams);
         $rows = $stmt->fetchAll();
 
-        // Process Data
+        // Process Data for JSON
         $distributors = array();
         foreach ($rows as $r) {
             $total = intval($r['TotalShipments']);
             $onTime = intval($r['OnTimeCount']);
-            
-            // Avoid divide by zero
+
+            // Calculate percentage safely
             if ($total > 0) {
                 $pct = ($onTime / $total) * 100;
             } else {
                 $pct = 0;
             }
-            
+
             $delay = ($r['AvgDelay'] !== null) ? floatval($r['AvgDelay']) : 0.0;
-            
+
             $distributors[] = array(
                 'id' => $r['CompanyID'],
                 'name' => $r['CompanyName'],
+                'tier' => $r['TierLevel'],
+                'region' => $r['ContinentName'],
                 'volume' => $total,
                 'quantity' => intval($r['TotalQuantity']),
                 'pct' => $pct,
                 'delay' => $delay,
-                'rank' => 0 
+                'rank' => 0 // Placeholder, calculated below
             );
         }
 
-        // --- SORTING ---
-        // Sort based on user request (or default delay)
+        // --- SORTING (PHP Layer) ---
+        // Sorting in PHP allows us to easily sort by calculated fields like 'pct'
         usort($distributors, function($a, $b) use ($sortBy, $sortDir) {
             $valA = $a[$sortBy];
             $valB = $b[$sortBy];
-            
+
             if ($valA == $valB) return 0;
-            
-            if ($sortBy === 'name') {
+
+            if ($sortBy === 'name' || $sortBy === 'region') {
                 return ($sortDir === 'asc') ? strcmp($valA, $valB) : strcmp($valB, $valA);
             }
-            
+
             // Numeric comparison
             $dir = ($sortDir === 'asc') ? 1 : -1;
             return ($valA > $valB) ? (1 * $dir) : (-1 * $dir);
         });
 
         // --- RANK ASSIGNMENT ---
-        // Rank is simply the row number after sorting
         foreach ($distributors as $key => $d) {
             $distributors[$key]['rank'] = $key + 1;
         }
 
-        // --- PREPARE CHART DATA (ALL COMPANIES) ---
-        // Delay Chart (Sorted by Delay Descending)
-        $delayData = $distributors; 
+        // --- PREPARE CHART DATA ---
+        // We sort specifically for charts to show "Top 10" or "Worst 10" visually
+        
+        // Delay Chart (Worst first)
+        $delayData = $distributors;
         usort($delayData, function($a, $b) {
             if ($a['delay'] == $b['delay']) return 0;
-            return ($a['delay'] > $b['delay']) ? -1 : 1; 
+            return ($a['delay'] > $b['delay']) ? -1 : 1;
         });
-        
+
         $chartDelay = array('labels' => array(), 'values' => array());
         foreach($delayData as $d) {
             $chartDelay['labels'][] = $d['name'];
             $chartDelay['values'][] = $d['delay'];
         }
 
-        // Volume Chart (Sorted by Volume Descending)
-        $volData = $distributors; 
+        // Volume Chart (Highest first)
+        $volData = $distributors;
         usort($volData, function($a, $b) {
             if ($a['volume'] == $b['volume']) return 0;
-            return ($a['volume'] > $b['volume']) ? -1 : 1; 
+            return ($a['volume'] > $b['volume']) ? -1 : 1;
         });
-        
+
         $chartVolume = array('labels' => array(), 'values' => array());
         foreach($volData as $d) {
             $chartVolume['labels'][] = $d['name'];
             $chartVolume['values'][] = $d['volume'];
         }
 
-        // Metrics
+        // Metrics Summation
         $totalVol = 0; $totalQty = 0;
-        foreach ($distributors as $d) { 
-            $totalVol += $d['volume']; 
-            $totalQty += $d['quantity']; 
+        foreach ($distributors as $d) {
+            $totalVol += $d['volume'];
+            $totalQty += $d['quantity'];
         }
 
         echo json_encode(array(
@@ -149,11 +172,15 @@ if (isset($_GET['ajax'])) {
 }
 
 // --- DROPDOWN DATA ---
+// Fetching distinct values for filters
 $distList = array();
 $stmtDist = $pdo->query("SELECT d.CompanyID, c.CompanyName FROM Distributor d JOIN Company c ON d.CompanyID = c.CompanyID ORDER BY c.CompanyName");
-if ($stmtDist) {
-    $distList = $stmtDist->fetchAll();
-}
+if ($stmtDist) $distList = $stmtDist->fetchAll();
+
+$regionList = array();
+$stmtReg = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentName");
+if ($stmtReg) $regionList = $stmtReg->fetchAll();
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -164,6 +191,7 @@ if ($stmtDist) {
     <link rel="stylesheet" href="../assets/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        /* Ensures the table has its own scrollable area */
         .table-scroll-window {
             height: 500px;
             overflow-y: auto;
@@ -175,62 +203,23 @@ if ($stmtDist) {
         .table-scroll-window table {
             width: 100%;
             margin-top: 0;
-            table-layout: auto; 
+            table-layout: auto;
         }
         /* Sticky Header Fix */
         .table-scroll-window thead th {
             position: sticky;
             top: 0;
-            z-index: 1000; /* High z-index to stay on top */
-            background-color: #2a2a2a; /* Solid background so content doesn't show through */
+            z-index: 1000;
+            background-color: #1a1a1a;
             border-bottom: 3px solid var(--purdue-gold);
-            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
             color: #ffffff !important;
-            transition: background 0.3s;
         }
-        /* Sortable column pointer */
-        th.sortable {
-            cursor: pointer;
-        }
-        th.sortable:hover {
-            background: #333;
-        }
-        /* Highlight active column */
-        .table-scroll-window thead th.active-header {
+        th.sortable { cursor: pointer; }
+        th.sortable:hover { background: #333; }
+        
+        .active-header {
             background: rgba(207, 185, 145, 0.2);
             color: var(--purdue-gold) !important;
-            border-bottom: 3px solid #fff;
-        }
-        .sort-icon {
-            margin-left: 5px;
-            font-size: 0.8em;
-            color: var(--purdue-gold);
-        }
-        /* Dynamic sizing for huge numbers in cards */
-        .stat-card h3 {
-            font-size: clamp(1.5rem, 4vw, 3rem);
-            word-break: break-word;
-            line-height: 1.1;
-        }
-        .loading-overlay {
-            display: none;
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.5);
-            z-index: 5;
-            justify-content: center;
-            align-items: center;
-            color: var(--purdue-gold);
-            font-weight: bold;
-        }
-        .charts-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin: 20px 0;
-        }
-        @media (max-width: 900px) {
-            .charts-row { grid-template-columns: 1fr; }
         }
         .chart-container {
             background: rgba(0, 0, 0, 0.6);
@@ -238,9 +227,11 @@ if ($stmtDist) {
             border-radius: 12px;
             border: 2px solid rgba(207, 185, 145, 0.3);
         }
-        .chart-wrapper {
-            position: relative;
-            min-height: 400px; 
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            align-items: end;
         }
     </style>
 </head>
@@ -257,13 +248,14 @@ if ($stmtDist) {
 
     <nav class="container sub-nav">
         <a href="dashboard.php">Dashboard</a>
+        <a href="companies.php">Company Financial Health</a>
         <a href="financial.php">Financial Health</a>
-        <a href="regional_disruptions.php">Regional Disruptions</a>
         <a href="critical_companies.php">Critical Companies</a>
+        <a href="regional_disruptions.php">Regional Disruptions</a>
         <a href="timeline.php">Disruption Timeline</a>
-        <a href="companies.php">Company List</a>
-        <a href="distributors.php" class="active">Distributors</a>
         <a href="disruptions.php">Disruption Analysis</a>
+        <a href="distributors.php" class="active">Distributors</a>
+        <a href="add_company.php">Add Company</a>
     </nav>
 
     <div class="container">
@@ -274,7 +266,7 @@ if ($stmtDist) {
             <form id="filterForm" onsubmit="return false;">
                 <div class="filter-grid">
                     <div class="filter-group">
-                        <label>Select Distributor:</label>
+                        <label>Distributor Name:</label>
                         <select id="distributor_id">
                             <option value="">All Distributors</option>
                             <?php foreach ($distList as $dist): ?>
@@ -282,6 +274,28 @@ if ($stmtDist) {
                                     <?= htmlspecialchars($dist['CompanyName']) ?>
                                 </option>
                             <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Region:</label>
+                        <select id="region">
+                            <option value="">All Regions</option>
+                            <?php foreach ($regionList as $r): ?>
+                                <option value="<?= $r['ContinentName'] ?>">
+                                    <?= htmlspecialchars($r['ContinentName']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Tier:</label>
+                        <select id="tier">
+                            <option value="">All Tiers</option>
+                            <option value="1">Tier 1</option>
+                            <option value="2">Tier 2</option>
+                            <option value="3">Tier 3</option>
                         </select>
                     </div>
                 </div>
@@ -321,24 +335,23 @@ if ($stmtDist) {
             </div>
         </div>
 
-        <div class="content-section" style="position: relative;">
-            <div id="loadingIndicator" class="loading-overlay">Updating...</div>
+        <div class="content-section">
             <h3>Detailed Distributor List</h3>
             <div id="tableWrapper" class="table-scroll-window">
                 <table class="distributor-table m-0" style="border:none;">
                     <thead>
                         <tr>
                             <th id="th-rank" style="cursor: default;">Rank</th>
-                            
                             <th id="th-name" onclick="changeSort('name')" class="sortable">Distributor Name <span class="sort-icon" id="sort-name"></span></th>
+                            <th id="th-region" onclick="changeSort('region')" class="sortable">Region <span class="sort-icon" id="sort-region"></span></th>
+                            <th id="th-tier" onclick="changeSort('tier')" class="sortable">Tier <span class="sort-icon" id="sort-tier"></span></th>
                             <th id="th-volume" onclick="changeSort('volume')" class="sortable">Total Shipments <span class="sort-icon" id="sort-volume"></span></th>
                             <th id="th-quantity" onclick="changeSort('quantity')" class="sortable">Total Quantity <span class="sort-icon" id="sort-quantity"></span></th>
                             <th id="th-pct" onclick="changeSort('pct')" class="sortable">On-Time % <span class="sort-icon" id="sort-pct"></span></th>
                             <th id="th-delay" onclick="changeSort('delay')" class="sortable">Avg Delay (Days) <span class="sort-icon" id="sort-delay">▲</span></th>
                         </tr>
                     </thead>
-                    <tbody id="tableBody">
-                        </tbody>
+                    <tbody id="tableBody"></tbody>
                 </table>
             </div>
         </div>
@@ -348,22 +361,29 @@ if ($stmtDist) {
     document.addEventListener('DOMContentLoaded', function() {
         var currentSortCol = 'delay';
         var currentSortDir = 'asc';
-        
         var delayChartInstance = null;
         var volumeChartInstance = null;
-        
-        var timeout = null;
 
+        // Restore State
         if(sessionStorage.getItem('dist_id')) document.getElementById('distributor_id').value = sessionStorage.getItem('dist_id');
+        if(sessionStorage.getItem('dist_region')) document.getElementById('region').value = sessionStorage.getItem('dist_region');
+        if(sessionStorage.getItem('dist_tier')) document.getElementById('tier').value = sessionStorage.getItem('dist_tier');
 
         loadData();
         updateHeaderHighlight();
 
+        // Listeners
         document.getElementById('distributor_id').addEventListener('change', loadData);
-        
+        document.getElementById('region').addEventListener('change', loadData);
+        document.getElementById('tier').addEventListener('change', loadData);
+
         document.getElementById('resetBtn').addEventListener('click', function() {
             sessionStorage.removeItem('dist_id');
+            sessionStorage.removeItem('dist_region');
+            sessionStorage.removeItem('dist_tier');
             document.getElementById('distributor_id').value = '';
+            document.getElementById('region').value = '';
+            document.getElementById('tier').value = '';
             currentSortCol = 'delay';
             currentSortDir = 'asc';
             updateSortIcons();
@@ -373,13 +393,11 @@ if ($stmtDist) {
 
         window.changeSort = function(col) {
             if (currentSortCol === col) {
-                // Toggle direction
                 currentSortDir = (currentSortDir === 'desc') ? 'asc' : 'desc';
             } else {
-                // New column
                 currentSortCol = col;
-                // Sensible defaults
-                if(col === 'volume' || col === 'quantity' || col === 'pct') currentSortDir = 'desc';
+                // Default direction based on column type
+                if(['volume','quantity','pct'].indexOf(col) !== -1) currentSortDir = 'desc';
                 else currentSortDir = 'asc';
             }
             updateSortIcons();
@@ -398,25 +416,28 @@ if ($stmtDist) {
 
         function updateSortIcons() {
             var icons = document.querySelectorAll('.sort-icon');
-            for(var i=0; i<icons.length; i++) {
-                icons[i].textContent = '';
-            }
+            for(var i=0; i<icons.length; i++) icons[i].textContent = '';
             var symbol = (currentSortDir === 'asc') ? '▲' : '▼';
             var activeIcon = document.getElementById('sort-' + currentSortCol);
             if(activeIcon) activeIcon.textContent = symbol;
         }
 
         function loadData() {
-            var loader = document.getElementById('loadingIndicator');
             var wrapper = document.getElementById('tableWrapper');
-            if(loader) loader.style.display = 'flex';
-            if(wrapper) wrapper.style.opacity = '0.3';
+            if(wrapper) wrapper.style.opacity = '0.5';
 
             var dId = document.getElementById('distributor_id').value;
+            var reg = document.getElementById('region').value;
+            var tier = document.getElementById('tier').value;
+
             sessionStorage.setItem('dist_id', dId);
+            sessionStorage.setItem('dist_region', reg);
+            sessionStorage.setItem('dist_tier', tier);
 
             var params = 'ajax=1' + 
                 '&dist_id=' + encodeURIComponent(dId) +
+                '&region=' + encodeURIComponent(reg) +
+                '&tier=' + encodeURIComponent(tier) +
                 '&sort_col=' + encodeURIComponent(currentSortCol) +
                 '&sort_dir=' + encodeURIComponent(currentSortDir);
 
@@ -431,14 +452,10 @@ if ($stmtDist) {
                             renderTable(r.distributors);
                             renderCharts(r.chartDelay, r.chartVolume);
                         } else {
-                            document.getElementById('tableBody').innerHTML = '<tr><td colspan="6" class="no-data">Error: ' + esc(r.message) + '</td></tr>';
+                            console.error(r.message);
                         }
-                    } catch(e) {
-                        console.error("JSON Error", e);
-                        document.getElementById('tableBody').innerHTML = '<tr><td colspan="6" class="no-data">Data Error</td></tr>';
-                    }
+                    } catch(e) { console.error("JSON Error", e); }
                 }
-                if(loader) loader.style.display = 'none';
                 if(wrapper) wrapper.style.opacity = '1';
             };
             xhr.send();
@@ -455,7 +472,7 @@ if ($stmtDist) {
             tbody.innerHTML = '';
 
             if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="no-data" style="text-align:center; padding:30px;">No distributors found.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="no-data">No distributors found.</td></tr>';
                 return;
             }
 
@@ -478,6 +495,8 @@ if ($stmtDist) {
                 tr.innerHTML = 
                     '<td><strong>#' + d.rank + '</strong></td>' +
                     '<td><strong>' + esc(d.name) + '</strong></td>' +
+                    '<td>' + esc(d.region) + '</td>' +
+                    '<td><span class="tier-badge">Tier ' + esc(d.tier) + '</span></td>' +
                     '<td>' + parseInt(d.volume).toLocaleString() + '</td>' +
                     '<td>' + parseInt(d.quantity).toLocaleString() + '</td>' +
                     '<td><span class="performance-badge ' + badgeClass + '">' + displayPct + '</span></td>' +
@@ -488,22 +507,7 @@ if ($stmtDist) {
         }
 
         function renderCharts(dData, vData) {
-            // Adjust height if there are many items
-            var itemCount = dData.labels.length;
-            var minHeight = 400;
-            
-            if (itemCount > 20) {
-                var newHeight = itemCount * 25; 
-                document.querySelectorAll('.chart-wrapper').forEach(function(el) {
-                    el.style.height = newHeight + 'px';
-                });
-            } else {
-                document.querySelectorAll('.chart-wrapper').forEach(function(el) {
-                    el.style.height = minHeight + 'px';
-                });
-            }
-
-            // 1. DELAY CHART
+            // Delay Chart
             var ctxD = document.getElementById('delayChart').getContext('2d');
             if (delayChartInstance) delayChartInstance.destroy();
             
@@ -530,7 +534,7 @@ if ($stmtDist) {
                 }
             });
 
-            // 2. VOLUME CHART
+            // Volume Chart
             var ctxV = document.getElementById('volumeChart').getContext('2d');
             if (volumeChartInstance) volumeChartInstance.destroy();
             
