@@ -1,11 +1,8 @@
-/* Purdue Maximalist Design System */
-/* Black & Gold Color Scheme */
+/* PURDUE MAXIMALIST DESIGN SYSTEM Black & Gold Color Scheme */
 
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600;700&display=swap');
 
-/* ============================================
-   ROOT VARIABLES
-   ============================================ */
+/* ROOT VARIABLES */
 :root {
   --purdue-gold: #CFB991;
   --purdue-gold-light: #f4e4c1;
@@ -25,16 +22,13 @@
   --border-radius-large: 16px;
 }
 
-/* ============================================
-   GLOBAL RESET & BASE STYLES - STRONGER FIX
-   ============================================ */
+/* GLOBAL RESET & BASE STYLES */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-/* SUPER AGGRESSIVE FIX: Force black everywhere */
 html {
   background: #000000 !important;
   background-color: #000000 !important;
@@ -55,7 +49,7 @@ body {
   height: auto;
 }
 
-/* Add gradient overlay as a separate layer */
+/* Gradient overlay as separate layer */
 body::after {
   content: '';
   position: fixed;
@@ -81,9 +75,8 @@ body::before {
   pointer-events: none;
   z-index: -1;
 }
-/* ============================================
-   LAYOUT
-   ============================================ */
+
+/* LAYOUT */
 .container { 
   width: 95%; 
   max-width: 1400px; 
@@ -93,9 +86,7 @@ body::before {
   z-index: 1;
 }
 
-/* ============================================
-   HEADER
-   ============================================ */
+/* HEADER */
 header { 
   background: linear-gradient(135deg, var(--purdue-black) 0%, var(--purdue-gray) 100%);
   padding: 28px 0; 
@@ -143,9 +134,7 @@ header h1 {
   position: relative;
 }
 
-/* ============================================
-   NAVIGATION
-   ============================================ */
+/* NAVIGATION */
 header nav,
 nav { 
   display: flex;
@@ -205,7 +194,8 @@ nav a.active {
 header nav a[href="logout.php"],
 nav a[href="logout.php"],
 header nav a[href="../logout.php"],
-nav a[href="../logout.php"] {
+nav a[href="../logout.php"],
+.logout-btn {
   background: #dc3545;
   color: white;
   border-color: #dc3545;
@@ -214,16 +204,26 @@ nav a[href="../logout.php"] {
 header nav a[href="logout.php"]:hover,
 nav a[href="logout.php"]:hover,
 header nav a[href="../logout.php"]:hover,
-nav a[href="../logout.php"]:hover {
+nav a[href="../logout.php"]:hover,
+.logout-btn:hover {
   background: #c82333;
   color: white;
   border-color: #c82333;
   box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
 }
 
-/* ============================================
-   TYPOGRAPHY
-   ============================================ */
+/* Sub Navigation Bar (used in ERP/SCM pages) */
+.sub-nav {
+  background: rgba(0, 0, 0, 0.8);
+  padding: 15px 30px;
+  margin-bottom: 30px;
+  border-radius: 8px;
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+/* TYPOGRAPHY */
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
   color: var(--purdue-gold);
@@ -247,9 +247,7 @@ p {
   color: var(--text-light);
 }
 
-/* ============================================
-   TABLES
-   ============================================ */
+/* TABLES */
 table { 
   width: 100%; 
   border-collapse: separate;
@@ -306,9 +304,24 @@ tr:hover td {
   color: var(--purdue-gold);
 }
 
-/* ============================================
-   BUTTONS & INPUTS
-   ============================================ */
+/* Sortable table headers */
+th.sortable,
+th[onclick] {
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sortable:hover,
+th[onclick]:hover {
+  background: var(--purdue-gold-dark);
+}
+
+.sort-indicator {
+  margin-left: 5px;
+  font-size: 0.8em;
+}
+
+/* BUTTONS & INPUTS */
 button, 
 input[type=submit],
 input[type=button],
@@ -390,9 +403,72 @@ input[type=button]:disabled,
   color: var(--purdue-black);
 }
 
-/* ============================================
-   FORMS
-   ============================================ */
+/* Filter Button */
+.btn-filter {
+  padding: 8px 20px;
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  align-self: flex-end;
+}
+
+.btn-filter:hover {
+  background: var(--purdue-gold-dark);
+}
+
+/* Reset Button */
+.btn-reset {
+  padding: 8px 20px;
+  background: #666;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  align-self: flex-end;
+}
+
+.btn-reset:hover {
+  background: #555;
+}
+
+/* Submit Button */
+.btn-submit {
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+  padding: 12px 30px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1.1em;
+  font-weight: bold;
+}
+
+.btn-submit:hover {
+  background: var(--purdue-gold-dark);
+}
+
+/* Cancel Button */
+.btn-cancel {
+  background: #666;
+  color: white;
+  padding: 12px 30px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1.1em;
+  margin-left: 10px;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-cancel:hover {
+  background: #555;
+}
+
+/* FORMS */
 .form-row { 
   margin-bottom: 24px;
 }
@@ -416,6 +492,7 @@ input[type=password],
 input[type=number],
 input[type=tel],
 input[type=url],
+input[type=date],
 select,
 textarea {
   width: 100%;
@@ -438,6 +515,7 @@ input[type=password]:focus,
 input[type=number]:focus,
 input[type=tel]:focus,
 input[type=url]:focus,
+input[type=date]:focus,
 select:focus,
 textarea:focus {
   outline: none;
@@ -453,16 +531,384 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
-/* ============================================
-   UTILITY CLASSES
-   ============================================ */
-small.error,
-.error { 
-  color: var(--error-red);
-  font-weight: 600;
-  text-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+/* Form Container */
+.form-container {
+  max-width: 800px;
+  margin: 0 auto;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 30px;
+  border-radius: 8px;
 }
 
+/* Form Group */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--purdue-gold);
+  font-weight: bold;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--purdue-gold);
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  border-radius: 4px;
+  font-size: 1em;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: var(--purdue-gold-dark);
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* Form Hint Text */
+.form-hint {
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 5px;
+}
+
+/* Required Field Indicator */
+.required {
+  color: #f44336;
+}
+
+/* Radio Group */
+.radio-group {
+  display: flex;
+  gap: 20px;
+  margin-top: 8px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.radio-option input[type="radio"] {
+  width: auto;
+}
+
+.radio-option label {
+  margin: 0;
+  font-weight: normal;
+  color: white;
+}
+
+/* Location Section (for add company form) */
+.location-section {
+  background: rgba(207, 185, 145, 0.1);
+  padding: 15px;
+  border-radius: 4px;
+  margin-top: 10px;
+}
+
+/* FILTER SECTIONS */
+.filter-section {
+  background: rgba(0, 0, 0, 0.7);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 30px;
+}
+
+.filter-row {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.filter-group {
+  flex: 1;
+  min-width: 180px;
+}
+
+.filter-group label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--purdue-gold);
+  font-weight: bold;
+}
+
+.filter-group input,
+.filter-group select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--purdue-gold);
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  border-radius: 4px;
+}
+
+/* Filter Grid Layout */
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+/* STATS & METRICS */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin: 30px 0;
+}
+
+.stat-card {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 24px;
+  border-radius: 8px;
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  text-align: center;
+}
+
+.stat-card h3 {
+  margin: 0;
+  font-size: 2rem;
+  color: var(--purdue-gold);
+}
+
+.stat-card p {
+  margin: 8px 0 0 0;
+  color: var(--text-light);
+}
+
+.stat-card small {
+  color: rgba(207, 185, 145, 0.7);
+  font-size: 0.85rem;
+}
+
+/* Stat Card Color Variants */
+.stat-card.healthy h3 { color: #4caf50; }
+.stat-card.warning h3 { color: #ff9800; }
+.stat-card.critical h3 { color: #f44336; }
+.stat-card.peak h3 { color: #f44336; }
+
+/* Metrics Grid (alternative style) */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.metric-card {
+  background: rgba(207, 185, 145, 0.1);
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid rgba(207, 185, 145, 0.3);
+}
+
+.metric-value {
+  font-size: 2em;
+  font-weight: bold;
+  color: var(--purdue-gold);
+}
+
+.metric-label {
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 5px;
+}
+
+/* CHARTS */
+.chart-container {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 24px;
+  border-radius: 12px;
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  margin: 20px 0;
+}
+
+.chart-wrapper {
+  position: relative;
+  height: 350px;
+}
+
+.chart-wrapper.tall {
+  height: 400px;
+}
+
+/* Charts Row (side by side) */
+.charts-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 20px;
+}
+
+/* BADGES */
+
+/* Health Score Badges */
+.health-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.health-good { background: #4caf50; color: white; }
+.health-warning { background: #ff9800; color: white; }
+.health-bad { background: #f44336; color: white; }
+.health-none { background: #666; color: white; }
+
+/* Impact Level Badges */
+.impact-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-weight: bold;
+}
+
+.impact-high { background: #f44336; color: white; }
+.impact-medium { background: #ff9800; color: white; }
+.impact-low { background: #4caf50; color: white; }
+
+/* Impact Boxes (for regional display) */
+.impact-box {
+  text-align: center;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.impact-box.impact-high { 
+  background: rgba(244, 67, 54, 0.2); 
+  border: 1px solid #f44336; 
+  color: #f44336; 
+}
+
+.impact-box.impact-medium { 
+  background: rgba(255, 152, 0, 0.2); 
+  border: 1px solid #ff9800; 
+  color: #ff9800; 
+}
+
+.impact-box.impact-low { 
+  background: rgba(76, 175, 80, 0.2); 
+  border: 1px solid #4caf50; 
+  color: #4caf50; 
+}
+
+/* Criticality Badges */
+.criticality-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.criticality-critical { background: #f44336; color: white; }
+.criticality-high { background: #ff9800; color: white; }
+.criticality-moderate { background: #ffc107; color: black; }
+.criticality-low { background: #4caf50; color: white; }
+
+/* Tier Badge */
+.tier-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: rgba(207, 185, 145, 0.3);
+  font-size: 0.9em;
+}
+
+/* Category Badge */
+.category-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgba(207, 185, 145, 0.2);
+  color: var(--purdue-gold);
+  border: 1px solid rgba(207, 185, 145, 0.5);
+}
+
+/* Performance Badges */
+.performance-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-weight: bold;
+}
+
+.perf-excellent { background: #4caf50; color: white; }
+.perf-good { background: #8bc34a; color: white; }
+.perf-fair { background: #ffc107; color: black; }
+.perf-poor { background: #f44336; color: white; }
+
+/* Complexity Badges */
+.complexity-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.complexity-high {
+  background: rgba(220, 53, 69, 0.3);
+  color: #ff6b7a;
+  border: 1px solid #dc3545;
+}
+
+.complexity-medium {
+  background: rgba(255, 193, 7, 0.3);
+  color: #ffc107;
+  border: 1px solid #ffc107;
+}
+
+.complexity-low {
+  background: rgba(40, 167, 69, 0.3);
+  color: #5cb85c;
+  border: 1px solid #28a745;
+}
+
+/* ALERTS & MESSAGES */
+.alert {
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.alert-error {
+  background: rgba(244, 67, 54, 0.2);
+  border: 1px solid #f44336;
+  color: #ff9999;
+}
+
+.alert-success {
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid #4caf50;
+  color: #90ee90;
+}
+
+.alert-warning {
+  background: rgba(255, 193, 7, 0.2);
+  border: 1px solid #ffc107;
+  color: #ffd54f;
+}
+
+.alert-info {
+  background: rgba(33, 150, 243, 0.2);
+  border: 1px solid #2196f3;
+  color: #64b5f6;
+}
+
+/* CARDS & SECTIONS */
 .content-section,
 .section {
   background: rgba(0, 0, 0, 0.6);
@@ -474,26 +920,6 @@ small.error,
   position: relative;
 }
 
-.accent-bar {
-  height: 4px;
-  background: linear-gradient(90deg, var(--purdue-gold), transparent);
-  margin: 24px 0;
-  border-radius: 2px;
-}
-
-.text-center {
-  text-align: center;
-}
-
-.text-gold {
-  color: var(--purdue-gold);
-}
-
-.text-white {
-  color: var(--text-white);
-}
-
-/* Card Component */
 .card {
   background: rgba(0, 0, 0, 0.6);
   padding: 32px;
@@ -509,7 +935,303 @@ small.error,
   border-color: var(--purdue-gold);
 }
 
-/* Grid System */
+/* Region Cards */
+.region-card {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 20px;
+  border-radius: 8px;
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  margin: 15px 0;
+}
+
+.region-card h4 {
+  color: var(--purdue-gold);
+  margin: 0 0 15px 0;
+}
+
+/* Impact Row (for regional disruptions) */
+.impact-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 10px 0;
+}
+
+/* Info Box */
+.info-box {
+  background: rgba(207, 185, 145, 0.1);
+  padding: 15px;
+  border-radius: 8px;
+  margin: 20px 0;
+  border-left: 4px solid var(--purdue-gold);
+}
+
+.info-box h4 {
+  color: var(--purdue-gold);
+  margin: 0 0 10px 0;
+}
+
+/* Category List */
+.category-list {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 20px;
+  border-radius: 8px;
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  margin: 20px 0;
+}
+
+.category-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px;
+  margin: 5px 0;
+  background: rgba(207, 185, 145, 0.1);
+  border-radius: 4px;
+}
+
+.category-item span:first-child { color: var(--text-light); }
+.category-item span:last-child { color: var(--purdue-gold); font-weight: bold; }
+
+/* TOGGLE BUTTONS (View Mode Switches) */
+.view-toggle {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.toggle-btn {
+  padding: 10px 20px;
+  background: rgba(207, 185, 145, 0.2);
+  border: 2px solid var(--purdue-gold);
+  color: var(--purdue-gold);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.toggle-btn.active {
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+}
+
+.toggle-btn:hover {
+  background: rgba(207, 185, 145, 0.3);
+}
+
+.toggle-btn.active:hover {
+  background: var(--purdue-gold-dark);
+}
+
+/* SPECIALIZED TABLES */
+
+/* Company Table */
+.company-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.company-table th {
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+  padding: 12px;
+  text-align: left;
+  font-weight: bold;
+}
+
+.company-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(207, 185, 145, 0.2);
+}
+
+.company-table tr:hover {
+  background: rgba(207, 185, 145, 0.1);
+}
+
+/* Disruption Table */
+.disruption-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.disruption-table th {
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+  padding: 12px;
+  text-align: left;
+  font-weight: bold;
+}
+
+.disruption-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(207, 185, 145, 0.2);
+}
+
+.disruption-table tr:hover {
+  background: rgba(207, 185, 145, 0.1);
+}
+
+/* Distributor Table */
+.distributor-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.distributor-table th {
+  background: var(--purdue-gold);
+  color: var(--purdue-black);
+  padding: 12px;
+  text-align: left;
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+}
+
+.distributor-table th:hover {
+  background: var(--purdue-gold-dark);
+}
+
+.distributor-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(207, 185, 145, 0.2);
+}
+
+.distributor-table tr:hover {
+  background: rgba(207, 185, 145, 0.1);
+}
+
+/* Network Table */
+.network-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+
+.network-table th,
+.network-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(207, 185, 145, 0.2);
+}
+
+.network-table th {
+  background: rgba(207, 185, 145, 0.2);
+  color: var(--purdue-gold);
+  font-weight: 700;
+}
+
+.network-table td {
+  color: white;
+}
+
+.network-table tr:hover {
+  background: rgba(207, 185, 145, 0.1);
+}
+
+/* Product Table */
+.product-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+
+.product-table th,
+.product-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(207, 185, 145, 0.2);
+}
+
+.product-table th {
+  background: rgba(207, 185, 145, 0.2);
+  color: var(--purdue-gold);
+  font-weight: 700;
+}
+
+.product-table td {
+  color: white;
+}
+
+.product-table tr:hover {
+  background: rgba(207, 185, 145, 0.1);
+}
+
+/* UTILITY CLASSES */
+small.error,
+.error { 
+  color: var(--error-red);
+  font-weight: 600;
+  text-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+}
+
+.accent-bar {
+  height: 4px;
+  background: linear-gradient(90deg, var(--purdue-gold), transparent);
+  margin: 24px 0;
+  border-radius: 2px;
+}
+
+.text-center { text-align: center; }
+.text-left { text-align: left; }
+.text-right { text-align: right; }
+
+.text-gold { color: var(--purdue-gold); }
+.text-white { color: var(--text-white); }
+.text-light { color: var(--text-light); }
+.text-muted { color: rgba(255, 255, 255, 0.6); }
+
+/* Display Utilities */
+.hidden { display: none; }
+.block { display: block; }
+.inline-block { display: inline-block; }
+
+/* Loading State */
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--purdue-gold);
+}
+
+/* No Data Message */
+.no-data {
+  text-align: center;
+  padding: 50px;
+  color: #999;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+}
+
+/* Overflow Handling */
+.overflow-x-auto { overflow-x: auto; }
+.overflow-y-auto { overflow-y: auto; }
+
+/* Results Count */
+.results-count {
+  margin-top: 10px;
+  color: var(--purdue-gold);
+  font-size: 0.95em;
+}
+
+/* Back Link */
+.back-link {
+  display: inline-block;
+  padding: 12px 24px;
+  background: rgba(207, 185, 145, 0.2);
+  color: var(--purdue-gold);
+  text-decoration: none;
+  border-radius: 5px;
+  margin-bottom: 20px;
+  transition: all 0.3s;
+}
+
+.back-link:hover {
+  background: rgba(207, 185, 145, 0.3);
+}
+
+/* GRID SYSTEM */
 .grid {
   display: grid;
   gap: 32px;
@@ -527,49 +1249,39 @@ small.error,
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
-/* Flex Utilities */
-.flex {
-  display: flex;
-}
+/* FLEX UTILITIES */
+.flex { display: flex; }
+.flex-center { display: flex; justify-content: center; align-items: center; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.flex-column { display: flex; flex-direction: column; }
+.flex-wrap { flex-wrap: wrap; }
+.align-items-center { align-items: center; }
+.align-items-end { align-items: flex-end; }
 
-.flex-center {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
+.gap-xs { gap: 5px; }
+.gap-sm { gap: 8px; }
+.gap-md { gap: 16px; }
+.gap-lg { gap: 32px; }
 
-.flex-between {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+/* SPACING UTILITIES */
+.m-0 { margin: 0; }
+.mt-0 { margin-top: 0; }
+.mb-0 { margin-bottom: 0; }
 
-.flex-column {
-  display: flex;
-  flex-direction: column;
-}
-
-.gap-sm {
-  gap: 8px;
-}
-
-.gap-md {
-  gap: 16px;
-}
-
-.gap-lg {
-  gap: 32px;
-}
-
-/* Spacing Utilities */
+.mt-xs { margin-top: 8px; }
 .mt-sm { margin-top: 16px; }
 .mt-md { margin-top: 32px; }
 .mt-lg { margin-top: 48px; }
 
+.mb-xs { margin-bottom: 8px; }
 .mb-sm { margin-bottom: 16px; }
 .mb-md { margin-bottom: 32px; }
 .mb-lg { margin-bottom: 48px; }
 
+.ml-sm { margin-left: 10px; }
+.mr-sm { margin-right: 10px; }
+
+.p-0 { padding: 0; }
 .pt-sm { padding-top: 16px; }
 .pt-md { padding-top: 32px; }
 .pt-lg { padding-top: 48px; }
@@ -578,9 +1290,167 @@ small.error,
 .pb-md { padding-bottom: 32px; }
 .pb-lg { padding-bottom: 48px; }
 
-/* ============================================
-   RESPONSIVE DESIGN
-   ============================================ */
+.p-sm { padding: 16px; }
+.p-md { padding: 24px; }
+.p-lg { padding: 40px; }
+
+/* MEMBERS GRID (Landing Page) */
+.members-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: center;
+  margin-bottom: 30px;
+}
+
+.member {
+  margin: 0;
+  text-align: center;
+  flex: 0 0 auto;
+}
+
+.member img {
+  max-width: 150px;
+  max-height: 150px;
+  object-fit: cover;
+  display: block;
+  border-radius: 8px;
+}
+
+.member figcaption {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+/* LOGIN BOX (Landing Page) */
+.login-box {
+  background: rgba(0, 0, 0, 0.7);
+  padding: 30px;
+  border-radius: 12px;
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  max-width: 400px;
+  margin: 40px auto;
+}
+
+.login-box h2 {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.login-box label {
+  display: block;
+  margin-bottom: 16px;
+  color: var(--purdue-gold);
+  font-weight: 600;
+}
+
+.login-box input {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.login-box button {
+  width: 100%;
+  margin-top: 20px;
+}
+
+.login-feedback {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 4px;
+  text-align: center;
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.login-feedback:empty {
+  display: none;
+}
+
+/* DASHBOARD CARDS (ERP/SCM Dashboard) */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  margin-top: 40px;
+}
+
+.dashboard-card {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 32px;
+  border-radius: 12px;
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  box-shadow: 0 8px 32px rgba(207, 185, 145, 0.2);
+  transition: all 0.3s ease;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.dashboard-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 16px 48px rgba(207, 185, 145, 0.4);
+  border-color: var(--purdue-gold);
+}
+
+.dashboard-card h3 {
+  margin-top: 0;
+  font-size: 1.5rem;
+  color: var(--purdue-gold);
+  margin-bottom: 16px;
+}
+
+.dashboard-card p {
+  color: var(--text-light);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.dashboard-card ul {
+  flex-grow: 1;
+  margin-bottom: 20px;
+  color: var(--text-light);
+  line-height: 1.8;
+}
+
+.dashboard-card .icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+  display: block;
+}
+
+.dashboard-card .btn-link {
+  display: inline-block;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, var(--purdue-gold) 0%, var(--purdue-gold-dark) 100%);
+  color: var(--purdue-black);
+  text-decoration: none;
+  border-radius: 5px;
+  font-weight: 700;
+  transition: all 0.3s;
+  margin-top: auto;
+  text-align: center;
+}
+
+.dashboard-card .btn-link:hover {
+  box-shadow: 0 6px 20px rgba(207, 185, 145, 0.6);
+}
+
+/* Welcome Section */
+.welcome-section {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 40px;
+  border-radius: 12px;
+  border: 2px solid rgba(207, 185, 145, 0.3);
+  margin-bottom: 40px;
+}
+
+.welcome-section h2 {
+  margin-top: 0;
+}
+
+/* RESPONSIVE DESIGN */
 @media (max-width: 768px) {
   header .container {
     flex-direction: column;
@@ -632,23 +1502,176 @@ small.error,
   .grid-4 {
     grid-template-columns: 1fr;
   }
+  
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .filter-row {
+    flex-direction: column;
+  }
+  
+  .filter-group {
+    width: 100%;
+  }
+  
+  .stats-grid,
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .sub-nav {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .impact-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .view-toggle {
+    flex-direction: column;
+  }
 }
 
-/* Make the members grid display horizontally */
-.members-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    justify-content: center;
-    margin-bottom: 30px;
+/* PRINT STYLES */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  header, nav, .sub-nav, .filter-section, .btn, button {
+    display: none !important;
+  }
+  
+  .content-section, .card, .chart-container {
+    border: 1px solid #ccc;
+    box-shadow: none;
+    background: white;
+  }
+  
+  table {
+    border: 1px solid #ccc;
+  }
+  
+  th {
+    background: #f0f0f0 !important;
+    color: black !important;
+  }
+  
+  td {
+    background: white !important;
+    color: black !important;
+  }
 }
 
-.member {
-    margin: 0;
+/* =========================================
+   ADDED: MODAL & UTILITY STYLES
+   ========================================= */
+
+/* Modal Background */
+.modal {
+    display: none; 
+    position: fixed; 
+    z-index: 2000; 
+    left: 0; top: 0;
+    width: 100%; height: 100%; 
+    overflow: auto; 
+    background-color: rgba(0,0,0,0.85); 
+    backdrop-filter: blur(5px);
+}
+
+/* Modal Content Box */
+.modal-content {
+    background: linear-gradient(135deg, var(--purdue-gray-dark) 0%, #080808 100%);
+    margin: 5% auto;
+    padding: 35px;
+    border: 2px solid var(--purdue-gold);
+    width: 60%; 
+    max-width: 800px;
+    border-radius: 16px; /* var(--border-radius-large) manually set if var fails */
+    box-shadow: 0 0 60px rgba(207, 185, 145, 0.25);
+    color: #ffffff; /* var(--text-white) */
+    position: relative;
+}
+
+/* Close Button (X) */
+.close {
+    position: absolute;
+    right: 20px;
+    top: 15px;
+    color: var(--purdue-gold);
+    font-size: 32px;
+    font-weight: bold;
+    transition: all 0.3s;
+    cursor: pointer;
+    line-height: 1;
+}
+.close:hover {
+    color: #ffffff;
+    transform: scale(1.1);
+    text-shadow: 0 0 15px var(--purdue-gold);
+}
+
+/* Loading & Error States */
+.loading {
     text-align: center;
-    flex: 0 0 auto; /* Prevent items from growing/shrinking */
+    color: var(--purdue-gold);
+    font-size: 1.2em;
+    padding: 40px;
+}
+.modal-error {
+    padding: 20px; 
+    text-align: center;
+    color: #ff6b6b;
 }
 
+/* Modal Typography Helpers */
+.modal-header {
+    color: var(--purdue-gold);
+    border-bottom: 1px solid var(--purdue-gold);
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+    margin-top: 0;
+}
+.modal-grid {
+    display: grid; 
+    grid-template-columns: 1fr 1fr; 
+    gap: 20px;
+}
+.modal-section {
+    margin-top: 25px; 
+    padding-top: 15px; 
+    border-top: 1px solid rgba(207, 185, 145, 0.3);
+}
+.section-title {
+    margin-bottom: 10px;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    font-size: 0.9em;
+}
+.health-score-large {
+    font-size: 1.1em; 
+    padding: 5px 15px;
+}
+/* Table with Gray Header */
+.table-gray-header th {
+    background: linear-gradient(135deg, var(--purdue-gray-dark) 0%, var(--purdue-black) 100%) !important;
+    color: var(--purdue-gold) !important;
+    border-bottom: 3px solid var(--purdue-gold) !important;
+}
+.table-gray-header th:hover {
+    background: var(--purdue-gray-dark) !important;
+}
 .member img {
     max-width: 150px;
     max-height: 150px;
