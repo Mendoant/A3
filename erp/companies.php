@@ -1,9 +1,11 @@
 <?php
-// companies.php - View and search all companies with AJAX filtering
+// companies.php - View and search all companies
+// updated: added product list to the view details modal
+
 require_once '../config.php';
 requireLogin();
 
-// kick out supply chain managers
+// security check
 if (!hasRole('SeniorManager')) {
     header('Location: ../scm/dashboard.php');
     exit;
@@ -11,13 +13,165 @@ if (!hasRole('SeniorManager')) {
 
 $pdo = getPDO();
 
-// grab filter values
-$searchName = isset($_GET['search']) ? trim($_GET['search']) : '';
+// =================================================================
+// 1. AJAX HANDLER: "VIEW DETAILS" MODAL
+// =================================================================
+if (isset($_GET['ajax_view_id'])) {
+    // keeping errors off for json safety
+    error_reporting(0); 
+    header('Content-Type: text/html; charset=utf-8');
+
+    try {
+        $id = intval($_GET['ajax_view_id']);
+        
+        // 1. Basic Company Info
+        $stmt = $pdo->prepare("
+            SELECT c.*, l.City, l.CountryName, l.ContinentName 
+            FROM Company c
+            LEFT JOIN Location l ON c.LocationID = l.LocationID
+            WHERE c.CompanyID = ?
+        ");
+        $stmt->execute(array($id));
+        $comp = $stmt->fetch();
+
+        // 2. Financial Info (Last 4)
+        $stmtFin = $pdo->prepare("
+            SELECT * FROM FinancialReport 
+            WHERE CompanyID = ? 
+            ORDER BY RepYear DESC, FIELD(Quarter, 'Q4', 'Q3', 'Q2', 'Q1') 
+            LIMIT 4
+        ");
+        $stmtFin->execute(array($id));
+        $reports = $stmtFin->fetchAll();
+
+        // 3. Products Supplied (NEW)
+        // joining products table to get names and categories
+        $prodSql = "SELECT p.ProductName, p.Category, sp.SupplyPrice
+                    FROM SuppliesProduct sp
+                    JOIN Product p ON sp.ProductID = p.ProductID
+                    WHERE sp.SupplierID = ?
+                    ORDER BY p.ProductName";
+        $stmtProds = $pdo->prepare($prodSql);
+        $stmtProds->execute(array($id));
+        $productList = $stmtProds->fetchAll();
+        $prodCount = count($productList);
+
+        if ($comp) {
+            echo "<div class='info-box'>";
+            
+            // --- HEADER ---
+            echo "<h3 style='color: var(--purdue-gold); border-bottom: 1px solid var(--purdue-gold); padding-bottom: 10px; margin-bottom: 15px;'>" . htmlspecialchars($comp['CompanyName']) . "</h3>";
+            
+            // --- GRID LAYOUT (Info) ---
+            echo "<div class='grid-2' style='display: grid; grid-template-columns: 1fr 1fr; gap: 20px;'>";
+                
+                // Left Col
+                echo "<div>";
+                echo "<h5 class='text-muted' style='margin-bottom:10px;'>General Information</h5>";
+                echo "<p><strong>ID:</strong> " . $comp['CompanyID'] . "</p>";
+                echo "<p><strong>Type:</strong> " . htmlspecialchars($comp['Type']) . "</p>";
+                echo "<p><strong>Tier:</strong> Tier " . htmlspecialchars($comp['TierLevel']) . "</p>";
+                echo "<p><strong>Total Products:</strong> " . intval($prodCount) . "</p>";
+                echo "</div>";
+
+                // Right Col
+                $city = !empty($comp['City']) ? $comp['City'] : 'N/A';
+                $country = !empty($comp['CountryName']) ? $comp['CountryName'] : 'N/A';
+                $continent = !empty($comp['ContinentName']) ? $comp['ContinentName'] : 'N/A';
+
+                echo "<div>";
+                echo "<h5 class='text-muted' style='margin-bottom:10px;'>Location Details</h5>";
+                echo "<p><strong>City:</strong> " . htmlspecialchars($city) . "</p>";
+                echo "<p><strong>Country:</strong> " . htmlspecialchars($country) . "</p>";
+                echo "<p><strong>Region:</strong> " . htmlspecialchars($continent) . "</p>";
+                echo "</div>";
+
+            echo "</div>"; 
+
+            // --- PRODUCT LIST SECTION (NEW) ---
+            echo "<div style='margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(207, 185, 145, 0.3);'>";
+            echo "<h5 class='text-muted' style='margin-bottom:15px;'>Products Supplied</h5>";
+            
+            if ($prodCount > 0) {
+                echo "<div style='max-height: 200px; overflow-y: auto;'>";
+                echo "<table style='width:100%; margin-top:0; background:rgba(0,0,0,0.3); font-size: 0.9em;'>";
+                echo "<thead><tr>
+                        <th style='padding:8px;'>Product Name</th>
+                        <th style='padding:8px;'>Category</th>
+                        <th style='padding:8px;'>Price</th>
+                      </tr></thead>";
+                echo "<tbody>";
+                foreach ($productList as $p) {
+                    echo "<tr>";
+                    echo "<td style='padding:8px;'>" . htmlspecialchars($p['ProductName']) . "</td>";
+                    echo "<td style='padding:8px; color:#ccc;'>" . htmlspecialchars($p['Category']) . "</td>";
+                    echo "<td style='padding:8px; color: var(--purdue-gold);'>$" . number_format($p['SupplyPrice'], 2) . "</td>";
+                    echo "</tr>";
+                }
+                echo "</tbody></table>";
+                echo "</div>";
+            } else {
+                echo "<p class='text-muted'><em>No products listed for this supplier.</em></p>";
+            }
+            echo "</div>";
+
+            // --- FINANCIALS SECTION ---
+            echo "<div style='margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(207, 185, 145, 0.3);'>";
+            echo "<h5 class='text-muted' style='margin-bottom:15px;'>Recent Financial Performance (Last 4 Quarters)</h5>";
+            
+            if (count($reports) > 0) {
+                echo "<table style='width:100%; margin-top:0; background:rgba(0,0,0,0.3);'>";
+                echo "<thead><tr>
+                        <th style='padding:8px; font-size:0.9em;'>Period</th>
+                        <th style='padding:8px; font-size:0.9em;'>Health Score</th>
+                        <th style='padding:8px; font-size:0.9em;'>Status</th>
+                      </tr></thead>";
+                echo "<tbody>";
+                
+                foreach ($reports as $r) {
+                    $year = $r['RepYear'];
+                    $q = $r['Quarter'];
+                    $score = floatval($r['HealthScore']);
+                    
+                    $hClass = 'health-bad';
+                    $status = 'Critical';
+                    if ($score >= 75) { $hClass = 'health-good'; $status = 'Healthy'; }
+                    elseif ($score >= 50) { $hClass = 'health-warning'; $status = 'Warning'; }
+                    
+                    echo "<tr>";
+                    echo "<td style='padding:8px;'>" . htmlspecialchars($year) . " " . htmlspecialchars($q) . "</td>";
+                    echo "<td style='padding:8px;'><span class='health-badge $hClass'>" . number_format($score, 1) . "</span></td>";
+                    echo "<td style='padding:8px; color: #ccc;'>" . $status . "</td>";
+                    echo "</tr>";
+                }
+                echo "</tbody></table>";
+            } else {
+                echo "<p class='text-muted'><em>No financial reports filed yet.</em></p>";
+            }
+            echo "</div>";
+
+            echo "</div>"; 
+        } else {
+            http_response_code(404);
+            echo "<p class='error'>Company not found.</p>";
+        }
+    } catch (Exception $ex) {
+        http_response_code(500);
+        echo "<p class='error'>System Error: " . htmlspecialchars($ex->getMessage()) . "</p>";
+    }
+    exit; 
+}
+
+// =================================================================
+// 2. MAIN PAGE LOGIC (Search & List)
+// =================================================================
+
+$companyId = isset($_GET['company_id']) ? $_GET['company_id'] : ''; 
 $filterType = isset($_GET['type']) ? $_GET['type'] : '';
 $filterTier = isset($_GET['tier']) ? $_GET['tier'] : '';
 $filterRegion = isset($_GET['region']) ? $_GET['region'] : '';
 
-// build the query with filters
+// Base Query
 $sql = "SELECT c.CompanyID, c.CompanyName, c.Type, c.TierLevel,
                l.City, l.CountryName, l.ContinentName
         FROM Company c
@@ -26,350 +180,281 @@ $sql = "SELECT c.CompanyID, c.CompanyName, c.Type, c.TierLevel,
 
 $params = array();
 
-// add search filter if provided
-if ($searchName !== '') {
-    $sql .= " AND c.CompanyName LIKE ?";
-    $params[] = '%' . $searchName . '%';
+if ($companyId !== '') { 
+    $sql .= " AND c.CompanyID = ?"; 
+    $params[] = $companyId; 
+}
+if ($filterType !== '') { 
+    $sql .= " AND c.Type = ?"; 
+    $params[] = $filterType; 
+}
+if ($filterTier !== '') { 
+    $sql .= " AND c.TierLevel = ?"; 
+    $params[] = $filterTier; 
+}
+if ($filterRegion !== '') { 
+    $sql .= " AND l.ContinentName = ?"; 
+    $params[] = $filterRegion; 
 }
 
-// filter by type
-if ($filterType !== '') {
-    $sql .= " AND c.Type = ?";
-    $params[] = $filterType;
-}
-
-// filter by tier
-if ($filterTier !== '') {
-    $sql .= " AND c.TierLevel = ?";
-    $params[] = $filterTier;
-}
-
-// filter by region
-if ($filterRegion !== '') {
-    $sql .= " AND l.ContinentName = ?";
-    $params[] = $filterRegion;
-}
-
-$sql .= " ORDER BY c.CompanyName";
+// Default sort by ID
+$sql .= " ORDER BY c.CompanyID";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $companies = $stmt->fetchAll();
 
-// grab financial health scores for each company using a single query with subquery
-// get the latest quarter for each company
-$healthSQL = "SELECT 
-                fr.CompanyID,
-                fr.HealthScore
-              FROM FinancialReport fr
-              INNER JOIN (
-                  SELECT CompanyID, 
-                         MAX(CONCAT(RepYear, FIELD(Quarter, 'Q1', 'Q2', 'Q3', 'Q4'))) as maxPeriod
-                  FROM FinancialReport
-                  GROUP BY CompanyID
-              ) latest ON fr.CompanyID = latest.CompanyID 
-                  AND CONCAT(fr.RepYear, FIELD(fr.Quarter, 'Q1', 'Q2', 'Q3', 'Q4')) = latest.maxPeriod";
-
+// --- Bulk Fetch Latest Health Scores ---
+$healthSQL = "
+    SELECT CompanyID, HealthScore 
+    FROM FinancialReport 
+    ORDER BY RepYear DESC, FIELD(Quarter, 'Q4', 'Q3', 'Q2', 'Q1')
+";
 $healthStmt = $pdo->query($healthSQL);
-$healthScores = array();
-while ($row = $healthStmt->fetch()) {
-    $healthScores[$row['CompanyID']] = floatval($row['HealthScore']);
+$allScores = $healthStmt->fetchAll();
+
+$healthMap = array();
+foreach ($allScores as $row) {
+    if (!isset($healthMap[$row['CompanyID']])) {
+        $healthMap[$row['CompanyID']] = floatval($row['HealthScore']);
+    }
 }
 
-// add health scores to companies array
 foreach ($companies as $key => $comp) {
-    $companies[$key]['HealthScore'] = isset($healthScores[$comp['CompanyID']]) 
-        ? $healthScores[$comp['CompanyID']] 
-        : null;
+    $companies[$key]['HealthScore'] = isset($healthMap[$comp['CompanyID']]) ? $healthMap[$comp['CompanyID']] : null;
 }
 
-// get unique regions for filter dropdown
+// ajax return
+if (isset($_GET['ajax'])) {
+    header('Content-Type: application/json');
+    echo json_encode(array('success' => true, 'companies' => $companies, 'count' => count($companies)));
+    exit;
+}
+
+// Dropdown data
 $regionStmt = $pdo->query("SELECT DISTINCT ContinentName FROM Location WHERE ContinentName IS NOT NULL ORDER BY ContinentName");
 $regions = $regionStmt->fetchAll();
 
-// AJAX response - return json
-if (isset($_GET['ajax'])) {
-    header('Content-Type: application/json');
-    echo json_encode(array(
-        'success' => true,
-        'companies' => $companies,
-        'count' => count($companies)
-    ));
-    exit;
-}
+$compStmt = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName");
+$allCompanies = $compStmt->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Company List - ERP System</title>
+    <script src="../assets/forward_protection.js"></script>
     <link rel="stylesheet" href="../assets/styles.css">
+    
     <style>
-        .company-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            background: rgba(0,0,0,0.6);
+        /* Modal Styles */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 2000; 
+            left: 0; top: 0;
+            width: 100%; height: 100%; 
+            overflow: auto; 
+            background-color: rgba(0,0,0,0.85); 
+            backdrop-filter: blur(5px);
         }
-        .company-table th {
-            background: #CFB991;
-            color: #000;
-            padding: 12px;
-            text-align: left;
-            font-weight: bold;
-        }
-        .company-table td {
-            padding: 10px 12px;
-            border-bottom: 1px solid rgba(207,185,145,0.2);
-        }
-        .company-table tr:hover {
-            background: rgba(207,185,145,0.1);
-        }
-        .health-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.9em;
-            font-weight: bold;
-        }
-        .health-good { background: #4caf50; color: white; }
-        .health-warning { background: #ffc107; color: black; }
-        .health-bad { background: #f44336; color: white; }
-        .health-none { background: #666; color: white; }
-        .filter-section {
-            background: rgba(0,0,0,0.7);
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-        .filter-row {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-            align-items: flex-end;
-        }
-        .filter-group {
-            flex: 1;
-            min-width: 200px;
-        }
-        .filter-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: #CFB991;
-            font-weight: bold;
-        }
-        .filter-group input,
-        .filter-group select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #CFB991;
-            background: rgba(0,0,0,0.5);
+        .modal-content {
+            background: linear-gradient(135deg, var(--purdue-gray-dark) 0%, #080808 100%);
+            margin: 5% auto;
+            padding: 35px;
+            border: 2px solid var(--purdue-gold);
+            width: 60%; 
+            max-width: 800px;
+            border-radius: 16px;
+            box-shadow: 0 0 60px rgba(207, 185, 145, 0.25);
             color: white;
-            border-radius: 4px;
-        }
-        .btn-filter {
-            padding: 8px 20px;
-            background: #CFB991;
-            color: #000;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            align-self: flex-end;
-        }
-        .btn-filter:hover {
-            background: #b89968;
-        }
-        .btn-reset {
-            padding: 8px 20px;
-            background: #666;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            align-self: flex-end;
-        }
-        .btn-reset:hover {
-            background: #555;
-        }
-        .results-count {
-            margin-top: 10px;
-            color: #CFB991;
-            font-size: 0.95em;
-        }
-        .tier-badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 3px;
-            background: rgba(207,185,145,0.3);
-            font-size: 0.9em;
-        }
-        .company-table th {
-            cursor: pointer;
-            user-select: none;
             position: relative;
         }
-        .company-table th:hover {
-            background: #b89968;
+        .close {
+            position: absolute;
+            right: 20px;
+            top: 15px;
+            color: var(--purdue-gold);
+            font-size: 32px;
+            font-weight: bold;
+            transition: all 0.3s;
+            cursor: pointer;
+            line-height: 1;
         }
-        .sort-indicator {
-            margin-left: 5px;
-            font-size: 0.8em;
-            opacity: 0.6;
+        .close:hover {
+            color: white;
+            transform: scale(1.1);
+            text-shadow: 0 0 15px var(--purdue-gold);
+        }
+        .loading {
+            text-align: center;
+            color: var(--purdue-gold);
+            font-size: 1.2em;
+            padding: 40px;
+        }
+        .btn-sm {
+            padding: 6px 16px;
+            font-size: 0.9em;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h1>Company List</h1>
-            <div>
-                <a href="add_company.php" class="btn" style="background: #4caf50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; margin-right: 10px;">+ Add New Company</a>
-                <a href="../logout.php" style="background: #f44336; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Logout</a>
-            </div>
+    <header>
+        <div class="container">
+            <h1>Enterprise Resource Planning Portal</h1>
+            <nav>
+                <span class="text-white">Welcome, <?= htmlspecialchars($_SESSION['FullName']) ?> (Senior Manager)</span>
+                <a href="../logout.php" class="logout-btn">Logout</a>
+            </nav>
         </div>
+    </header>
 
-        <nav class="container" style="background: rgba(0,0,0,0.8); padding: 15px 30px; margin-bottom: 30px; border-radius: 8px; display: flex; gap: 20px; flex-wrap: wrap;">
-            <a href="dashboard.php">Dashboard</a>
-            <a href="financial.php">Financial Health</a>
-            <a href="regional_disruptions.php">Regional Disruptions</a>
-            <a href="critical_companies.php">Critical Companies</a>
-            <a href="timeline.php">Disruption Timeline</a>
-            <a href="companies.php" class="active">Company List</a>
-            <a href="distributors.php">Distributors</a>
-            <a href="disruptions.php">Disruptions</a>
-        </nav>
+    <nav class="container sub-nav">
+        <a href="dashboard.php">Dashboard</a>
+        <a href="financial.php">Financial Health</a>
+        <a href="regional_disruptions.php">Regional Disruptions</a>
+        <a href="critical_companies.php">Critical Companies</a>
+        <a href="timeline.php">Disruption Timeline</a>
+        <a href="companies.php" class="active">Company List</a>
+        <a href="distributors.php">Distributors</a>
+        <a href="disruptions.php">Disruption Analysis</a>
+    </nav>
+
+    <div class="container">
+        <div class="flex flex-between align-items-center mb-md">
+            <h2>Company List</h2>
+            <a href="add_company.php" class="btn">+ Add New Company</a>
+        </div>
 
         <div class="filter-section">
             <form id="filterForm">
-                <div class="filter-row">
+                <div class="filter-grid">
                     <div class="filter-group">
-                        <label for="search">Company Name</label>
-                        <input type="text" id="search" name="search" value="<?= htmlspecialchars($searchName) ?>" placeholder="Search by name...">
+                        <label>Company Name</label>
+                        <select id="company_id">
+                            <option value="">All Companies</option>
+                            <?php foreach ($allCompanies as $c): ?>
+                                <option value="<?= $c['CompanyID'] ?>">
+                                    <?= htmlspecialchars($c['CompanyName']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
                     <div class="filter-group">
-                        <label for="type">Type</label>
-                        <select id="type" name="type">
+                        <label>Type</label>
+                        <select id="type">
                             <option value="">All Types</option>
-                            <option value="Manufacturer" <?= $filterType === 'Manufacturer' ? 'selected' : '' ?>>Manufacturer</option>
-                            <option value="Distributor" <?= $filterType === 'Distributor' ? 'selected' : '' ?>>Distributor</option>
-                            <option value="Retailer" <?= $filterType === 'Retailer' ? 'selected' : '' ?>>Retailer</option>
+                            <option value="Manufacturer">Manufacturer</option>
+                            <option value="Distributor">Distributor</option>
+                            <option value="Retailer">Retailer</option>
                         </select>
                     </div>
                     <div class="filter-group">
-                        <label for="tier">Tier Level</label>
-                        <select id="tier" name="tier">
+                        <label>Tier Level</label>
+                        <select id="tier">
                             <option value="">All Tiers</option>
-                            <option value="1" <?= $filterTier === '1' ? 'selected' : '' ?>>Tier 1</option>
-                            <option value="2" <?= $filterTier === '2' ? 'selected' : '' ?>>Tier 2</option>
-                            <option value="3" <?= $filterTier === '3' ? 'selected' : '' ?>>Tier 3</option>
+                            <option value="1">Tier 1</option>
+                            <option value="2">Tier 2</option>
+                            <option value="3">Tier 3</option>
                         </select>
                     </div>
                     <div class="filter-group">
-                        <label for="region">Region</label>
-                        <select id="region" name="region">
+                        <label>Region</label>
+                        <select id="region">
                             <option value="">All Regions</option>
                             <?php foreach ($regions as $r): ?>
-                                <option value="<?= htmlspecialchars($r['ContinentName']) ?>" <?= $filterRegion === $r['ContinentName'] ? 'selected' : '' ?>>
+                                <option value="<?= htmlspecialchars($r['ContinentName']) ?>">
                                     <?= htmlspecialchars($r['ContinentName']) ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <button type="submit" class="btn-filter">Apply Filters</button>
-                    <button type="button" class="btn-reset" onclick="resetFilters()">Reset</button>
+                </div>
+                <div class="flex gap-sm mt-sm" style="justify-content: flex-end;">
+                    <button type="button" class="btn-reset" onclick="resetFilters()">Clear Filters</button>
                 </div>
             </form>
-            <div class="results-count" id="resultsCount">
-                Showing <?= count($companies) ?> companies
-            </div>
+            <div class="results-count" id="resultsCount">Loading...</div>
         </div>
 
-        <div id="tableContainer">
+        <div id="tableContainer" class="overflow-x-auto">
             <table class="company-table">
                 <thead>
                     <tr>
                         <th onclick="sortTable(0)" data-sort="asc">ID <span class="sort-indicator">▲</span></th>
                         <th onclick="sortTable(1)" data-sort="asc">Company Name <span class="sort-indicator"></span></th>
                         <th onclick="sortTable(2)" data-sort="asc">Type <span class="sort-indicator"></span></th>
-                        <th onclick="sortTable(3)" data-sort="asc">Tier <span class="sort-indicator"></span></th>
+                        <th onclick="sortTable(3)" data-sort="asc" style="min-width: 120px;">Tier <span class="sort-indicator"></span></th>
                         <th onclick="sortTable(4)" data-sort="asc">Location <span class="sort-indicator"></span></th>
                         <th onclick="sortTable(5)" data-sort="asc">Region <span class="sort-indicator"></span></th>
                         <th onclick="sortTable(6)" data-sort="asc">Health Score <span class="sort-indicator"></span></th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody id="companyTableBody">
-                    <?php foreach ($companies as $comp): ?>
-                        <tr>
-                            <td><?= htmlspecialchars($comp['CompanyID']) ?></td>
-                            <td><strong><?= htmlspecialchars($comp['CompanyName']) ?></strong></td>
-                            <td><?= htmlspecialchars($comp['Type']) ?></td>
-                            <td><span class="tier-badge">Tier <?= htmlspecialchars($comp['TierLevel']) ?></span></td>
-                            <td><?= htmlspecialchars($comp['City'] ?: 'N/A') ?>, <?= htmlspecialchars($comp['CountryName'] ?: 'N/A') ?></td>
-                            <td><?= htmlspecialchars($comp['ContinentName'] ?: 'N/A') ?></td>
-                            <td>
-                                <?php if ($comp['HealthScore'] !== null): 
-                                    $score = $comp['HealthScore'];
-                                    $class = 'health-none';
-                                    if ($score >= 75) $class = 'health-good';
-                                    elseif ($score >= 50) $class = 'health-warning';
-                                    elseif ($score >= 0) $class = 'health-bad';
-                                ?>
-                                    <span class="health-badge <?= $class ?>"><?= number_format($score, 1) ?></span>
-                                <?php else: ?>
-                                    <span class="health-badge health-none">N/A</span>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <?php if (empty($companies)): ?>
-                        <tr>
-                            <td colspan="7" style="text-align: center; padding: 30px; color: #999;">
-                                No companies found matching your filters.
-                            </td>
-                        </tr>
-                    <?php endif; ?>
-                </tbody>
+                    </tbody>
             </table>
+        </div>
+    </div>
+
+    <div id="viewModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <div id="modalBody">
+                </div>
         </div>
     </div>
 
     <script>
     (function() {
-        var form = document.getElementById('filterForm');
-        var currentCompanies = <?= json_encode($companies) ?>;
-        
-        // handle form submission with AJAX
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            loadCompanies();
-            return false;
+        var currentCompanies = []; 
+        var timeout = null;
+
+        // --- RESTORE FILTERS ---
+        if(sessionStorage.getItem('comp_id')) document.getElementById('company_id').value = sessionStorage.getItem('comp_id');
+        if(sessionStorage.getItem('comp_type'))   document.getElementById('type').value   = sessionStorage.getItem('comp_type');
+        if(sessionStorage.getItem('comp_tier'))   document.getElementById('tier').value   = sessionStorage.getItem('comp_tier');
+        if(sessionStorage.getItem('comp_region')) document.getElementById('region').value = sessionStorage.getItem('comp_region');
+
+        loadCompanies();
+
+        // --- LISTENERS ---
+        var inputs = document.querySelectorAll('#filterForm select');
+        inputs.forEach(function(input) {
+            input.addEventListener('change', loadCompanies);
         });
-        
+
+        document.getElementById('filterForm').addEventListener('submit', function(e) { e.preventDefault(); loadCompanies(); });
+
         function loadCompanies() {
-            // build query params
-            var search = document.getElementById('search').value;
-            var type = document.getElementById('type').value;
-            var tier = document.getElementById('tier').value;
-            var region = document.getElementById('region').value;
-            
-            var params = 'ajax=1' +
-                '&search=' + encodeURIComponent(search) +
-                '&type=' + encodeURIComponent(type) +
-                '&tier=' + encodeURIComponent(tier) +
-                '&region=' + encodeURIComponent(region);
+            var cId = document.getElementById('company_id').value;
+            var tVal = document.getElementById('type').value;
+            var trVal = document.getElementById('tier').value;
+            var rVal = document.getElementById('region').value;
+
+            sessionStorage.setItem('comp_id', cId);
+            sessionStorage.setItem('comp_type', tVal);
+            sessionStorage.setItem('comp_tier', trVal);
+            sessionStorage.setItem('comp_region', rVal);
+
+            var params = 'ajax=1&company_id=' + encodeURIComponent(cId) +
+                '&type=' + encodeURIComponent(tVal) +
+                '&tier=' + encodeURIComponent(trVal) +
+                '&region=' + encodeURIComponent(rVal);
             
             var xhr = new XMLHttpRequest();
             xhr.open('GET', 'companies.php?' + params, true);
             xhr.onload = function() {
                 if (xhr.status === 200) {
-                    var response = JSON.parse(xhr.responseText);
-                    if (response.success) {
-                        currentCompanies = response.companies;
-                        updateTable(currentCompanies);
-                        document.getElementById('resultsCount').textContent = 
-                            'Showing ' + response.count + ' companies';
+                    try {
+                        var response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            currentCompanies = response.companies;
+                            updateTable(currentCompanies);
+                            document.getElementById('resultsCount').textContent = 'Showing ' + response.count + ' companies';
+                        }
+                    } catch(e) {
+                        console.error("JSON Error", e);
                     }
                 }
             };
@@ -379,125 +464,123 @@ if (isset($_GET['ajax'])) {
         function updateTable(companies) {
             var tbody = document.getElementById('companyTableBody');
             tbody.innerHTML = '';
-            
             if (companies.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 30px; color: #999;">No companies found matching your filters.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="no-data">No companies found matching your filters.</td></tr>';
                 return;
             }
-            
             companies.forEach(function(comp) {
                 var row = document.createElement('tr');
-                
-                // health score badge
-                var healthBadge = '';
+                var healthBadge = '<span class="health-badge health-none">N/A</span>';
                 if (comp.HealthScore !== null) {
                     var score = parseFloat(comp.HealthScore);
-                    var healthClass = 'health-none';
+                    var healthClass = 'health-bad';
                     if (score >= 75) healthClass = 'health-good';
                     else if (score >= 50) healthClass = 'health-warning';
-                    else if (score >= 0) healthClass = 'health-bad';
                     healthBadge = '<span class="health-badge ' + healthClass + '">' + score.toFixed(1) + '</span>';
-                } else {
-                    healthBadge = '<span class="health-badge health-none">N/A</span>';
                 }
                 
-                row.innerHTML = 
-                    '<td>' + escapeHtml(comp.CompanyID) + '</td>' +
-                    '<td><strong>' + escapeHtml(comp.CompanyName) + '</strong></td>' +
-                    '<td>' + escapeHtml(comp.Type) + '</td>' +
-                    '<td><span class="tier-badge">Tier ' + escapeHtml(comp.TierLevel) + '</span></td>' +
-                    '<td>' + escapeHtml(comp.City || 'N/A') + ', ' + escapeHtml(comp.CountryName || 'N/A') + '</td>' +
-                    '<td>' + escapeHtml(comp.ContinentName || 'N/A') + '</td>' +
-                    '<td>' + healthBadge + '</td>';
-                
+                var city = comp.City ? comp.City : 'N/A';
+                var country = comp.CountryName ? comp.CountryName : 'N/A';
+                var continent = comp.ContinentName ? comp.ContinentName : 'N/A';
+
+                row.innerHTML = '<td>' + esc(comp.CompanyID) + '</td>' +
+                    '<td><strong>' + esc(comp.CompanyName) + '</strong></td>' +
+                    '<td>' + esc(comp.Type) + '</td>' +
+                    '<td>Tier ' + esc(comp.TierLevel) + '</td>' +
+                    '<td>' + esc(city) + ', ' + esc(country) + '</td>' +
+                    '<td>' + esc(continent) + '</td>' +
+                    '<td>' + healthBadge + '</td>' + 
+                    '<td><button class="btn-secondary btn-sm" onclick="openModal(' + comp.CompanyID + ')">View Details</button></td>';
                 tbody.appendChild(row);
             });
         }
         
-        function escapeHtml(text) {
-            if (text === null || text === undefined) return '';
-            var map = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            };
-            return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
-        }
+        function esc(t) { if (!t) return ''; var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
         
-        // sort table by column index
+        // --- SORTING ---
         window.sortTable = function(columnIndex) {
             var table = document.querySelector('.company-table');
             var headers = table.querySelectorAll('th');
+            if(columnIndex >= 7) return; 
+
             var currentHeader = headers[columnIndex];
             var currentSort = currentHeader.getAttribute('data-sort');
             var newSort = currentSort === 'asc' ? 'desc' : 'asc';
             
-            // clear all sort indicators
-            headers.forEach(function(header) {
-                var indicator = header.querySelector('.sort-indicator');
-                if (indicator) indicator.textContent = '';
+            headers.forEach(function(header) { 
+                var ind = header.querySelector('.sort-indicator'); 
+                if (ind) ind.textContent = ''; 
             });
             
-            // set new sort indicator
-            var indicator = currentHeader.querySelector('.sort-indicator');
-            indicator.textContent = newSort === 'asc' ? '▲' : '▼';
+            var ind = currentHeader.querySelector('.sort-indicator');
+            if(ind) ind.textContent = newSort === 'asc' ? '▲' : '▼';
+            
             currentHeader.setAttribute('data-sort', newSort);
             
-            // sort the companies array
             currentCompanies.sort(function(a, b) {
                 var valA, valB;
-                
                 switch(columnIndex) {
-                    case 0: // ID
-                        valA = parseInt(a.CompanyID);
-                        valB = parseInt(b.CompanyID);
-                        break;
-                    case 1: // Company Name
-                        valA = (a.CompanyName || '').toLowerCase();
-                        valB = (b.CompanyName || '').toLowerCase();
-                        break;
-                    case 2: // Type
-                        valA = (a.Type || '').toLowerCase();
-                        valB = (b.Type || '').toLowerCase();
-                        break;
-                    case 3: // Tier
-                        valA = parseInt(a.TierLevel);
-                        valB = parseInt(b.TierLevel);
-                        break;
-                    case 4: // Location
-                        valA = ((a.City || '') + (a.CountryName || '')).toLowerCase();
-                        valB = ((b.City || '') + (b.CountryName || '')).toLowerCase();
-                        break;
-                    case 5: // Region
-                        valA = (a.ContinentName || '').toLowerCase();
-                        valB = (b.ContinentName || '').toLowerCase();
-                        break;
-                    case 6: // Health Score
-                        valA = a.HealthScore !== null ? parseFloat(a.HealthScore) : -999;
-                        valB = b.HealthScore !== null ? parseFloat(b.HealthScore) : -999;
-                        break;
-                    default:
-                        return 0;
+                    case 0: valA = parseInt(a.CompanyID); valB = parseInt(b.CompanyID); break;
+                    case 1: valA = (a.CompanyName || '').toLowerCase(); valB = (b.CompanyName || '').toLowerCase(); break;
+                    case 2: valA = (a.Type || '').toLowerCase(); valB = (b.Type || '').toLowerCase(); break;
+                    case 3: valA = parseInt(a.TierLevel); valB = parseInt(b.TierLevel); break;
+                    case 4: valA = ((a.City || '') + (a.CountryName || '')).toLowerCase(); valB = ((b.City || '') + (b.CountryName || '')).toLowerCase(); break;
+                    case 5: valA = (a.ContinentName || '').toLowerCase(); valB = (b.ContinentName || '').toLowerCase(); break;
+                    case 6: valA = a.HealthScore !== null ? parseFloat(a.HealthScore) : -999; valB = b.HealthScore !== null ? parseFloat(b.HealthScore) : -999; break;
                 }
-                
                 if (valA < valB) return newSort === 'asc' ? -1 : 1;
                 if (valA > valB) return newSort === 'asc' ? 1 : -1;
                 return 0;
             });
-            
-            // update the table with sorted data
             updateTable(currentCompanies);
         };
         
-        // reset filters function
         window.resetFilters = function() {
-            document.getElementById('search').value = '';
+            document.getElementById('company_id').value = '';
             document.getElementById('type').value = '';
             document.getElementById('tier').value = '';
             document.getElementById('region').value = '';
+            sessionStorage.removeItem('comp_id');
+            sessionStorage.removeItem('comp_type');
+            sessionStorage.removeItem('comp_tier');
+            sessionStorage.removeItem('comp_region');
             loadCompanies();
+        };
+
+        // --- MODAL STUFF ---
+        var modal = document.getElementById("viewModal");
+        var modalBody = document.getElementById("modalBody");
+
+        window.openModal = function(id) {
+            modal.style.display = "block";
+            modalBody.innerHTML = "<div class='loading'>Fetching company data...</div>";
+
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", "companies.php?ajax_view_id=" + id, true);
+            
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState == 4) {
+                    if (xhr.status == 200) {
+                        modalBody.innerHTML = xhr.responseText;
+                    } else {
+                        modalBody.innerHTML = "<div class='error text-center' style='padding:20px;'>" +
+                            "<h3>Error Loading Data</h3>" +
+                            "<p>Server responded with status: " + xhr.status + "</p>" +
+                            "</div>";
+                    }
+                }
+            };
+            xhr.send();
+        };
+
+        window.closeModal = function() {
+            modal.style.display = "none";
+        };
+
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
         };
     })();
     </script>
