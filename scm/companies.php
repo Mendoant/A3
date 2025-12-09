@@ -520,9 +520,9 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             <!-- Date Range Filter for KPIs/Transactions -->
             <div class="date-filter-bar">
                 <label>Date Range for KPIs & Transactions:</label>
-                <label>Start: <input type="date" id="detail_start_date" value="<?= date('Y-m-d', strtotime('-1 year')) ?>"></label>
-                <label>End: <input type="date" id="detail_end_date" value="<?= date('Y-m-d') ?>"></label>
-                <button onclick="refreshCompanyDetail()">Refresh</button>
+                <label>Start: <input type="text" id="start_date" value="<?= date('Y-m-d', strtotime('-1 year')) ?>" readonly style="width: 150px;"></label>
+                <label>End: <input type="text" id="end_date" value="<?= date('Y-m-d') ?>" readonly style="width: 150px;"></label>
+                
             </div>
 
             <!-- Tabs for organizing information -->
@@ -575,8 +575,8 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
 
     // Load comprehensive company details
     function loadCompanyDetail() {
-        var startDate = document.getElementById('detail_start_date').value;
-        var endDate = document.getElementById('detail_end_date').value;
+        var startDate = document.getElementById('start_date').value;
+        var endDate = document.getElementById('end_date').value;
         
         var xhr = new XMLHttpRequest();
         xhr.open('GET', 'companies.php?detail_id=' + currentCompanyID + '&start_date=' + startDate + '&end_date=' + endDate, true);
