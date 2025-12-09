@@ -11,6 +11,32 @@ if (hasRole('SeniorManager')) {
 
 $pdo = getPDO();
 
+// Get current disruptions
+$disruptionSql = "SELECT 
+    de.EventID,
+    de.EventDate,
+    de.EventRecoveryDate,
+    dc.CategoryName,
+    dc.Description as CategoryDescription,
+    GROUP_CONCAT(DISTINCT c.CompanyName ORDER BY c.CompanyName SEPARATOR ', ') as AffectedCompanies,
+    COUNT(DISTINCT ic.AffectedCompanyID) as CompanyCount,
+    DATEDIFF(CURDATE(), de.EventDate) as DaysSinceStart,
+    MAX(ic.ImpactLevel) as MaxImpact
+FROM DisruptionEvent de
+JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
+JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+WHERE de.EventRecoveryDate IS NULL 
+   OR de.EventRecoveryDate >= CURDATE()
+GROUP BY de.EventID, de.EventDate, de.EventRecoveryDate, dc.CategoryName, dc.Description
+ORDER BY de.EventDate DESC
+LIMIT 10";
+
+$disruptionStmt = $pdo->prepare($disruptionSql);
+$disruptionStmt->execute();
+$currentDisruptions = $disruptionStmt->fetchAll();
+
+
 // Get filters - default to last year
 $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-1 year'));
 $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
@@ -65,11 +91,29 @@ $companies = $stmt->fetchAll();
 $sql2 = "SELECT 
             AVG(DATEDIFF(de.EventRecoveryDate, de.EventDate)) as avgRecoveryTime
          FROM DisruptionEvent de
+         JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+         JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+         JOIN Location l ON c.LocationID = l.LocationID
          WHERE de.EventDate BETWEEN :start AND :end
          AND de.EventRecoveryDate IS NOT NULL";
 
+$params2 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql2 .= " AND c.CompanyID = :companyID";
+    $params2[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql2 .= " AND l.ContinentName = :region";
+    $params2[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql2 .= " AND c.TierLevel = :tier";
+    $params2[':tier'] = $tierLevel;
+}
+
 $stmt2 = $pdo->prepare($sql2);
-$stmt2->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt2->execute($params2);
 $recovery = $stmt2->fetch();
 $avgRecoveryTime = $recovery['avgRecoveryTime'] ? round($recovery['avgRecoveryTime'], 1) : 0;
 
@@ -79,11 +123,28 @@ $sql3 = "SELECT
             COUNT(DISTINCT de.EventID) as totalEvents,
             SUM(CASE WHEN ic.ImpactLevel = 'High' THEN 1 ELSE 0 END) as highImpactEvents
          FROM DisruptionEvent de
-         LEFT JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+         JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+         JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+         JOIN Location l ON c.LocationID = l.LocationID
          WHERE de.EventDate BETWEEN :start AND :end";
 
+$params3 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql3 .= " AND c.CompanyID = :companyID";
+    $params3[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql3 .= " AND l.ContinentName = :region";
+    $params3[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql3 .= " AND c.TierLevel = :tier";
+    $params3[':tier'] = $tierLevel;
+}
+
 $stmt3 = $pdo->prepare($sql3);
-$stmt3->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt3->execute($params3);
 $impact = $stmt3->fetch();
 
 $totalEvents = intval($impact['totalEvents']);
@@ -95,11 +156,29 @@ $hdr = $totalEvents > 0 ? round(($highImpactEvents / $totalEvents) * 100, 1) : 0
 $sql4 = "SELECT 
             SUM(DATEDIFF(de.EventRecoveryDate, de.EventDate)) as totalDowntime
          FROM DisruptionEvent de
+         JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+         JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+         JOIN Location l ON c.LocationID = l.LocationID
          WHERE de.EventDate BETWEEN :start AND :end
          AND de.EventRecoveryDate IS NOT NULL";
 
+$params4 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql4 .= " AND c.CompanyID = :companyID";
+    $params4[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql4 .= " AND l.ContinentName = :region";
+    $params4[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql4 .= " AND c.TierLevel = :tier";
+    $params4[':tier'] = $tierLevel;
+}
+
 $stmt4 = $pdo->prepare($sql4);
-$stmt4->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt4->execute($params4);
 $downtime = $stmt4->fetch();
 $totalDowntime = $downtime['totalDowntime'] ? intval($downtime['totalDowntime']) : 0;
 
@@ -112,37 +191,89 @@ $sql5 = "SELECT
          JOIN ImpactsCompany ic ON de.EventID = ic.EventID
          JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
          JOIN Location l ON c.LocationID = l.LocationID
-         WHERE de.EventDate BETWEEN :start AND :end
-         GROUP BY l.ContinentName
-         ORDER BY regionDisruptions DESC";
+         WHERE de.EventDate BETWEEN :start AND :end";
+
+$params5 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql5 .= " AND c.CompanyID = :companyID";
+    $params5[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql5 .= " AND l.ContinentName = :region";
+    $params5[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql5 .= " AND c.TierLevel = :tier";
+    $params5[':tier'] = $tierLevel;
+}
+
+$sql5 .= " GROUP BY l.ContinentName ORDER BY regionDisruptions DESC";
 
 $stmt5 = $pdo->prepare($sql5);
-$stmt5->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt5->execute($params5);
 $regions = $stmt5->fetchAll();
 
-// METRIC 6: Disruption Severity Distribution (DSD)
-// counts of low/medium/high severity events
+// METRIC 6: Disruption Severity Distribution by Month
 $sql6 = "SELECT 
+            DATE_FORMAT(de.EventDate, '%Y-%m') as period,
             ic.ImpactLevel,
             COUNT(DISTINCT de.EventID) as eventCount
          FROM DisruptionEvent de
          JOIN ImpactsCompany ic ON de.EventID = ic.EventID
-         WHERE de.EventDate BETWEEN :start AND :end
-         GROUP BY ic.ImpactLevel";
+         JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+         JOIN Location l ON c.LocationID = l.LocationID
+         WHERE de.EventDate BETWEEN :start AND :end";
+
+$params6 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql6 .= " AND c.CompanyID = :companyID";
+    $params6[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql6 .= " AND l.ContinentName = :region";
+    $params6[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql6 .= " AND c.TierLevel = :tier";
+    $params6[':tier'] = $tierLevel;
+}
+
+$sql6 .= " GROUP BY DATE_FORMAT(de.EventDate, '%Y-%m'), ic.ImpactLevel
+           ORDER BY period, ic.ImpactLevel";
 
 $stmt6 = $pdo->prepare($sql6);
-$stmt6->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt6->execute($params6);
 $severityDist = $stmt6->fetchAll();
 
 // Get all recovery times for ART histogram
 $sql7 = "SELECT DATEDIFF(de.EventRecoveryDate, de.EventDate) as recoveryDays
          FROM DisruptionEvent de
+         JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+         JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+         JOIN Location l ON c.LocationID = l.LocationID
          WHERE de.EventDate BETWEEN :start AND :end
          AND de.EventRecoveryDate IS NOT NULL
          AND DATEDIFF(de.EventRecoveryDate, de.EventDate) >= 0";
 
+$params7 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql7 .= " AND c.CompanyID = :companyID";
+    $params7[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql7 .= " AND l.ContinentName = :region";
+    $params7[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql7 .= " AND c.TierLevel = :tier";
+    $params7[':tier'] = $tierLevel;
+}
+
 $stmt7 = $pdo->prepare($sql7);
-$stmt7->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt7->execute($params7);
 $recoveryTimes = $stmt7->fetchAll(PDO::FETCH_COLUMN);
 
 // Get downtime by category for TD histogram
@@ -150,14 +281,94 @@ $sql8 = "SELECT dc.CategoryName,
                 SUM(DATEDIFF(de.EventRecoveryDate, de.EventDate)) as totalDowntime
          FROM DisruptionEvent de
          JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
+         JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+         JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+         JOIN Location l ON c.LocationID = l.LocationID
          WHERE de.EventDate BETWEEN :start AND :end
-         AND de.EventRecoveryDate IS NOT NULL
-         GROUP BY dc.CategoryName
-         ORDER BY totalDowntime DESC";
+         AND de.EventRecoveryDate IS NOT NULL";
+
+$params8 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql8 .= " AND c.CompanyID = :companyID";
+    $params8[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql8 .= " AND l.ContinentName = :region";
+    $params8[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql8 .= " AND c.TierLevel = :tier";
+    $params8[':tier'] = $tierLevel;
+}
+
+$sql8 .= " GROUP BY dc.CategoryName ORDER BY totalDowntime DESC";
 
 $stmt8 = $pdo->prepare($sql8);
-$stmt8->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt8->execute($params8);
 $downtimeByCategory = $stmt8->fetchAll();
+
+$sql8 = "SELECT l.ContinentName as RegionName,
+                SUM(DATEDIFF(de.EventRecoveryDate, de.EventDate)) as totalDowntime
+         FROM DisruptionEvent de
+         JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
+         JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+         JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+         JOIN Location l ON c.LocationID = l.LocationID
+         WHERE de.EventDate BETWEEN :start AND :end
+         AND de.EventRecoveryDate IS NOT NULL";
+
+$params8 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql8 .= " AND c.CompanyID = :companyID";
+    $params8[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql8 .= " AND l.ContinentName = :region";
+    $params8[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql8 .= " AND c.TierLevel = :tier";
+    $params8[':tier'] = $tierLevel;
+}
+
+$sql8 .= " GROUP BY l.ContinentName ORDER BY totalDowntime DESC";
+
+$stmt8 = $pdo->prepare($sql8);
+$stmt8->execute($params8);
+$downtimeByRegion = $stmt8->fetchAll();
+
+$sql9 = "SELECT c.TierLevel,
+                SUM(DATEDIFF(de.EventRecoveryDate, de.EventDate)) as totalDowntime
+         FROM DisruptionEvent de
+         JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
+         JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+         JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+         JOIN Location l ON c.LocationID = l.LocationID
+         WHERE de.EventDate BETWEEN :start AND :end
+         AND de.EventRecoveryDate IS NOT NULL";
+
+$params9 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql9 .= " AND c.CompanyID = :companyID";
+    $params9[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql9 .= " AND l.ContinentName = :region";
+    $params9[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql9 .= " AND c.TierLevel = :tier";
+    $params9[':tier'] = $tierLevel;
+}
+
+$sql9 .= " GROUP BY c.TierLevel ORDER BY totalDowntime DESC";
+
+$stmt9 = $pdo->prepare($sql9);
+$stmt9->execute($params9);
+$downtimeByTier = $stmt9->fetchAll();
 
 // Get data for RRC heatmap (Region x Category matrix)
 $sql9 = "SELECT l.ContinentName as Region,
@@ -168,12 +379,27 @@ $sql9 = "SELECT l.ContinentName as Region,
          JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
          JOIN Location l ON c.LocationID = l.LocationID
          JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
-         WHERE de.EventDate BETWEEN :start AND :end
-         GROUP BY l.ContinentName, dc.CategoryName
-         ORDER BY l.ContinentName, dc.CategoryName";
+         WHERE de.EventDate BETWEEN :start AND :end";
+
+$params9 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql9 .= " AND c.CompanyID = :companyID";
+    $params9[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql9 .= " AND l.ContinentName = :region";
+    $params9[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql9 .= " AND c.TierLevel = :tier";
+    $params9[':tier'] = $tierLevel;
+}
+
+$sql9 .= " GROUP BY l.ContinentName, dc.CategoryName ORDER BY l.ContinentName, dc.CategoryName";
 
 $stmt9 = $pdo->prepare($sql9);
-$stmt9->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt9->execute($params9);
 $heatmapData = $stmt9->fetchAll();
 
 // Get HDR data by category for bar chart
@@ -183,12 +409,29 @@ $sql10 = "SELECT dc.CategoryName,
           FROM DisruptionEvent de
           JOIN ImpactsCompany ic ON de.EventID = ic.EventID
           JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
-          WHERE de.EventDate BETWEEN :start AND :end
-          GROUP BY dc.CategoryName
-          ORDER BY dc.CategoryName";
+          JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+          JOIN Location l ON c.LocationID = l.LocationID
+          WHERE de.EventDate BETWEEN :start AND :end";
+
+$params10 = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sql10 .= " AND c.CompanyID = :companyID";
+    $params10[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sql10 .= " AND l.ContinentName = :region";
+    $params10[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sql10 .= " AND c.TierLevel = :tier";
+    $params10[':tier'] = $tierLevel;
+}
+
+$sql10 .= " GROUP BY dc.CategoryName ORDER BY dc.CategoryName";
 
 $stmt10 = $pdo->prepare($sql10);
-$stmt10->execute(array(':start' => $startDate, ':end' => $endDate));
+$stmt10->execute($params10);
 $hdrByCategory = $stmt10->fetchAll();
 
 // AJAX response
@@ -207,6 +450,8 @@ if (isset($_GET['ajax'])) {
             'severityDist' => $severityDist,
             'recoveryTimes' => $recoveryTimes,
             'downtimeByCategory' => $downtimeByCategory,
+            'downtimeByRegion' => $downtimeByRegion, //added for more data visibility
+            'downtimeByTier' => $downtimeByTier, //same as above
             'heatmapData' => $heatmapData,
             'hdrByCategory' => $hdrByCategory
         )
@@ -251,6 +496,84 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         .table-scroll-wrapper::-webkit-scrollbar-track { background: rgba(0,0,0,0.5); border-radius: 6px; }
         .table-scroll-wrapper::-webkit-scrollbar-thumb { background: #CFB991; border-radius: 6px; }
         .table-scroll-wrapper::-webkit-scrollbar-thumb:hover { background: #b89968; }
+        .disruption-banner-container {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 0;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 4px 20px rgba(220, 53, 69, 0.5);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+.disruption-banner-header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px 20px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+        }
+.disruption-banner-header .icon {
+            font-size: 1.5rem;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
+.disruption-banner-scroll {
+            overflow: hidden;
+            position: relative;
+            height: 60px;
+            display: flex;
+            align-items: center;
+        }
+.disruption-banner-content {
+            display: flex;
+            gap: 60px;
+            animation: scroll-left 30s linear infinite;
+            white-space: nowrap;
+            padding: 0 20px;
+        }
+.disruption-banner-content:hover {
+            animation-play-state: paused;
+        }
+        @keyframes scroll-left {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+.disruption-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 15px;
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+.disruption-item strong {
+            color: #FFD700;
+        }
+.disruption-item .badge {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        .impact-high { background: #ff4444 !important; }
+        .impact-medium { background: #ff9800 !important; }
+        .impact-low { background: #4caf50 !important; }
+        .disruption-count {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -274,15 +597,72 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         <a href="distributors.php">Distributors</a>
     </nav>
 
+   
+
     <div class="container">
         <h2>Disruption Event Analysis</h2>
+         <?php if (!empty($currentDisruptions)): ?>
+        <div class="disruption-banner-container">
+            <div class="disruption-banner-header">
+                <span class="icon">⚠️</span>
+                <span>ACTIVE DISRUPTIONS</span>
+                <span class="disruption-count"><?= count($currentDisruptions) ?> Active</span>
+                <span style="font-size: 0.85rem; font-weight: normal; margin-left: auto;">
+                    Hover to pause • 
+                </span>
+            </div>
 
+            <div class="disruption-banner-scroll">
+                <div class="disruption-banner-content">
+                    <?php foreach ($currentDisruptions as $disruption): ?>
+                        <div class="disruption-item">
+                            <strong><?= htmlspecialchars($disruption['CategoryName']) ?></strong>
+                            <span>•</span>
+                            <span><?= htmlspecialchars($disruption['CompanyCount']) ?> companies affected</span>
+                            <span>•</span>
+                            <span class="badge impact-<?= strtolower($disruption['MaxImpact']) ?>">
+                                <?= htmlspecialchars($disruption['MaxImpact']) ?> Impact
+                            </span>
+                            <span>•</span>
+                            <span><?= htmlspecialchars($disruption['DaysSinceStart']) ?> days ongoing</span>
+                            <?php if ($disruption['CompanyCount'] <= 3): ?>
+                                <span>•</span>
+                                <span style="font-size: 0.9rem;"><?= htmlspecialchars($disruption['AffectedCompanies']) ?></span>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+
+                    <?php foreach ($currentDisruptions as $disruption): ?>
+                        <div class="disruption-item">
+                            <strong><?= htmlspecialchars($disruption['CategoryName']) ?></strong>
+                            <span>•</span>
+                            <span><?= htmlspecialchars($disruption['CompanyCount']) ?> companies affected</span>
+                            <span>•</span>
+                            <span class="badge impact-<?= strtolower($disruption['MaxImpact']) ?>">
+                                <?= htmlspecialchars($disruption['MaxImpact']) ?> Impact
+                            </span>
+                            <span>•</span>
+                            <span><?= htmlspecialchars($disruption['DaysSinceStart']) ?> days ongoing</span>
+                            <?php if ($disruption['CompanyCount'] <= 3): ?>
+                                <span>•</span>
+                                <span style="font-size: 0.9rem;"><?= htmlspecialchars($disruption['AffectedCompanies']) ?></span>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
         <div class="content-section">
             <h3>Filter Disruptions</h3>
             <form id="filterForm">
                 <div class="filter-grid">
-                    <div><label>Start Date:</label><input type="date" id="start_date" value="<?= htmlspecialchars($startDate) ?>"></div>
-                    <div><label>End Date:</label><input type="date" id="end_date" value="<?= htmlspecialchars($endDate) ?>"></div>
+                    <div><label style="color: var(--text-light); display: block; margin-bottom: 5px;">Start Date:</label>
+                    <input type="date" id="start_date" value="<?= htmlspecialchars($startDate) ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                </div>
+                    <div><label style="color: var(--text-light); display: block; margin-bottom: 5px;">End Date:</label>
+                    <input type="date" id="end_date" value="<?= htmlspecialchars($endDate) ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                </div>
                     <div>
                         <label>Company (Optional):</label>
                         <select id="company_id">
@@ -315,9 +695,8 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                         </select>
                     </div>
                 </div>
-                <div style="margin-top: 20px; display: flex; gap: 10px;">
-                    <button type="submit">Apply Filters</button>
-                    <button type="button" id="clearBtn" class="btn-secondary">Clear</button>
+                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                    <button type="button" id="clearBtn" class="btn-secondary">Clear FIlter</button>
                 </div>
             </form>
         </div>
@@ -330,9 +709,10 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                 <small>In selected period</small>
             </div>
             <div class="metric-card">
-                <h3 id="metric-high" style="color: #f44336;"><?= $highImpactEvents ?></h3>
-                <p>High Impact Events</p>
-                <small id="metric-hdr"><?= $hdr ?>% of total</small>
+                <h3 id="metric-high" style="color: #f44336;"><?= $hdr ?>%</h3>
+                <p>High Impact Disruption Rate
+                </p>
+                <small id="metric-hdr"><?= $highImpactEvents ?> total events</small>
             </div>
             <div class="metric-card">
                 <h3 id="metric-recovery"><?= $avgRecoveryTime ?></h3>
@@ -346,66 +726,15 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             </div>
         </div>
 
-        <!-- Alerts for ongoing/new disruptions -->
-        <?php
-        // check for recent disruptions (last 7 days)
-        $recentSql = "SELECT 
-                        de.EventID,
-                        de.EventDate,
-                        dc.CategoryName,
-                        COUNT(DISTINCT ic.AffectedCompanyID) as companiesAffected
-                      FROM DisruptionEvent de
-                      JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
-                      LEFT JOIN ImpactsCompany ic ON de.EventID = ic.EventID
-                      WHERE de.EventDate >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-                      AND (de.EventRecoveryDate IS NULL OR de.EventRecoveryDate >= CURDATE())
-                      GROUP BY de.EventID, de.EventDate, dc.CategoryName
-                      ORDER BY de.EventDate DESC
-                      LIMIT 5";
-        $recentStmt = $pdo->query($recentSql);
-        $recentEvents = $recentStmt->fetchAll();
         
-        if (count($recentEvents) > 0):
-        ?>
-        <div class="alert-box">
-            <h4>⚠️ Recent/Ongoing Disruptions (Last 7 Days)</h4>
-            <ul>
-                <?php foreach ($recentEvents as $event): ?>
-                <li>
-                    <strong><?= htmlspecialchars($event['CategoryName']) ?></strong> on <?= $event['EventDate'] ?>
-                    - Affecting <?= $event['companiesAffected'] ?> companies
-                </li>
-                <?php endforeach; ?>
-            </ul>
-        </div>
-        <?php endif; ?>
 
         <!-- Charts Row -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
-            <!-- Regional Risk Concentration Heatmap -->
+            <!-- Disruption Frequency Bar Chart -->
             <div class="chart-container">
-                <h3>Regional Risk Concentration (RRC) - Heatmap</h3>
+                <h3>Disruption Frequency by Company (DF) - Top 15</h3>
                 <div class="chart-wrapper">
-                    <canvas id="regionalHeatmap"></canvas>
-                </div>
-            </div>
-
-            <!-- High-Impact Disruption Rate (HDR) by Category -->
-            <div class="chart-container">
-                <h3>High-Impact Disruption Rate (HDR) by Category</h3>
-                <div class="chart-wrapper">
-                    <canvas id="hdrChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <!-- Second Charts Row -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; margin-top: 20px;">
-            <!-- Disruption Severity Distribution Chart -->
-            <div class="chart-container">
-                <h3>Disruption Severity Distribution (DSD)</h3>
-                <div class="chart-wrapper">
-                    <canvas id="severityChart"></canvas>
+                    <canvas id="dfBarChart"></canvas>
                 </div>
             </div>
 
@@ -416,25 +745,52 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                     <canvas id="artHistogram"></canvas>
                 </div>
             </div>
-        </div>
-
-        <!-- Third Charts Row for TD and DF -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; margin-top: 20px;">
+            <!-- High-Impact Disruption Rate (HDR) by Category -->
+            <div class="chart-container">
+                <h3>High-Impact Disruption Rate (HDR) by Category</h3>
+                <div class="chart-wrapper">
+                    <canvas id="hdrChart"></canvas>
+                </div>
+            </div>
             <!-- Total Downtime Histogram -->
             <div class="chart-container">
-                <h3>Total Downtime Distribution (TD)</h3>
+                <h3>Total Downtime Distribution (TD) by Disruption Category</h3>
                 <div class="chart-wrapper">
                     <canvas id="tdHistogram"></canvas>
                 </div>
             </div>
-
-            <!-- Disruption Frequency Bar Chart -->
+            <!-- Total Downtime Histogram Region-->
             <div class="chart-container">
-                <h3>Disruption Frequency by Company (DF) - Top 15</h3>
+                <h3>Total Downtime Distribution (TD) by Region</h3>
                 <div class="chart-wrapper">
-                    <canvas id="dfBarChart"></canvas>
+                    <canvas id="tdHistogramRegion"></canvas>
                 </div>
             </div>
+            <!-- Total Downtime Histogram Tier-->
+            <div class="chart-container">
+                <h3>Total Downtime Distribution (TD) by Tier</h3>
+                <div class="chart-wrapper">
+                    <canvas id="tdHistogramTier"></canvas>
+                </div>
+            </div>
+
+            
+            <!-- Regional Risk Concentration Heatmap -->
+            <div class="chart-container">
+                <h3>Regional Risk Concentration (RRC) - Heatmap</h3>
+                <div class="chart-wrapper">
+                    <canvas id="regionalHeatmap"></canvas>
+                </div>
+            </div>
+            <!-- Disruption Severity Distribution Chart -->
+            <div class="chart-container">
+                <h3>Disruption Severity Distribution (DSD) Monthly Trend</h3>
+                <div class="chart-wrapper">
+                    <canvas id="severityChart"></canvas>
+                </div>
+            </div>
+
+            
         </div>
 
         <!-- Company Disruption Frequency Table -->
@@ -483,496 +839,643 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
     </div>
 
     <script>
-    (function() {
-        var form = document.getElementById('filterForm');
-        var regionalChart = null;
-        var severityChart = null;
+(function() {
+    var form = document.getElementById('filterForm');
+    
+    // Store chart instances globally so we can destroy and recreate them
+    var regionalHeatmapChart = null;
+    var hdrChart = null;
+    var severityChart = null;
+    var artHistogramChart = null;
+    var tdHistogramChart = null;
+    var tdHistogramRegion = null;
+    var tdHistogramTier = null;
+    var dfBarChart = null;
+    
+    // load disruption data via ajax
+    function load() {
+        var params = 'ajax=1&start_date=' + encodeURIComponent(document.getElementById('start_date').value) +
+                    '&end_date=' + encodeURIComponent(document.getElementById('end_date').value) +
+                    '&company_id=' + encodeURIComponent(document.getElementById('company_id').value) +
+                    '&region=' + encodeURIComponent(document.getElementById('region').value) +
+                    '&tier=' + encodeURIComponent(document.getElementById('tier').value);
         
-        // load disruption data via ajax
-        function load() {
-            var params = 'ajax=1&start_date=' + encodeURIComponent(document.getElementById('start_date').value) +
-                        '&end_date=' + encodeURIComponent(document.getElementById('end_date').value) +
-                        '&company_id=' + encodeURIComponent(document.getElementById('company_id').value) +
-                        '&region=' + encodeURIComponent(document.getElementById('region').value) +
-                        '&tier=' + encodeURIComponent(document.getElementById('tier').value);
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'disruptions.php?' + params, true);
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                var r = JSON.parse(xhr.responseText);
+                if (r.success) {
+                    var m = r.metrics;
+                    
+                    // Update metric cards
+                    document.getElementById('metric-total').textContent = m.totalEvents;
+                    document.getElementById('metric-high').textContent = m.hdr+ '%';
+                    document.getElementById('metric-hdr').textContent = m.highImpactEvents + ' total Events';
+                    document.getElementById('metric-recovery').textContent = m.avgRecoveryTime;
+                    document.getElementById('metric-downtime').textContent = m.totalDowntime;
+                    
+                    // Update all charts
+                    updateRegionalHeatmap(m.heatmapData);
+                    updateHDRChart(m.hdrByCategory);
+                    updateSeverityChart(m.severityDist);
+                    updateARTHistogram(m.recoveryTimes);
+                    updateTDHistogram(m.downtimeByCategory);
+                    updateTDHistogramRegion(m.downtimeByRegion);
+                    updateTDHistogramTier(m.downtimeByTier);
+                    updateDFBarChart(m.companies);
+                    
+                    // Rebuild table
+                    buildTable(m.companies);
+                }
+            }
+        };
+        xhr.send();
+    }
+    
+    // Update Regional Heatmap Chart
+    function updateRegionalHeatmap(heatmapData) {
+        if (regionalHeatmapChart) regionalHeatmapChart.destroy();
+        
+        if (!heatmapData || heatmapData.length === 0) {
+            return;
+        }
+        
+        var regions = [];
+        var categories = [];
+        var matrix = {};
+        
+        for (var i = 0; i < heatmapData.length; i++) {
+            var region = heatmapData[i].Region;
+            var category = heatmapData[i].Category;
             
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', 'disruptions.php?' + params, true);
-            xhr.onload = function() {
-                if (xhr.status === 200) {
-                    var r = JSON.parse(xhr.responseText);
-                    if (r.success) {
-                        var m = r.metrics;
-                        
-                        // update metric cards
-                        document.getElementById('metric-total').textContent = m.totalEvents;
-                        document.getElementById('metric-high').textContent = m.highImpactEvents;
-                        document.getElementById('metric-hdr').textContent = m.hdr + '% of total';
-                        document.getElementById('metric-recovery').textContent = m.avgRecoveryTime + ' days';
-                        document.getElementById('metric-downtime').textContent = m.totalDowntime + ' days';
-                        
-                        // regional chart
-                        var regionLabels = [];
-                        var regionCounts = [];
-                        for (var i = 0; i < m.regions.length; i++) {
-                            regionLabels.push(m.regions[i].ContinentName);
-                            regionCounts.push(parseInt(m.regions[i].regionDisruptions));
-                        }
-                        
-                        if (regionalChart) regionalChart.destroy();
-                        
-                        var ctx1 = document.getElementById('regionalChart').getContext('2d');
-                        regionalChart = new Chart(ctx1, {
-                            type: 'bar',
-                            data: {
-                                labels: regionLabels,
-                                datasets: [{
-                                    label: 'Disruptions',
-                                    data: regionCounts,
-                                    backgroundColor: '#CFB991'
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                scales: {
-                                    y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } },
-                                    x: { ticks: { color: 'white' }, grid: { color: 'rgba(207,185,145,0.1)' } }
-                                },
-                                plugins: { legend: { labels: { color: 'white' } } }
-                            }
-                        });
-                        
-                        // severity distribution chart (stacked bar or pie)
-                        var severityLabels = [];
-                        var severityCounts = [];
-                        var severityColors = [];
-                        
-                        for (var i = 0; i < m.severityDist.length; i++) {
-                            var s = m.severityDist[i];
-                            severityLabels.push(s.ImpactLevel);
-                            severityCounts.push(parseInt(s.eventCount));
-                            
-                            // color code by severity
-                            if (s.ImpactLevel === 'High') {
-                                severityColors.push('#f44336');
-                            } else if (s.ImpactLevel === 'Medium') {
-                                severityColors.push('#ff9800');
-                            } else {
-                                severityColors.push('#4caf50');
-                            }
-                        }
-                        
-                        if (severityChart) severityChart.destroy();
-                        
-                        var ctx2 = document.getElementById('severityChart').getContext('2d');
-                        severityChart = new Chart(ctx2, {
-                            type: 'doughnut',
-                            data: {
-                                labels: severityLabels,
-                                datasets: [{
-                                    data: severityCounts,
-                                    backgroundColor: severityColors
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: { 
-                                    legend: { 
-                                        labels: { color: 'white' },
-                                        position: 'bottom'
-                                    } 
-                                }
-                            }
-                        });
-                        
-                        // rebuild table
-                        buildTable(m.companies);
+            if (regions.indexOf(region) === -1) regions.push(region);
+            if (categories.indexOf(category) === -1) categories.push(category);
+            
+            if (!matrix[region]) matrix[region] = {};
+            matrix[region][category] = parseInt(heatmapData[i].eventCount);
+        }
+        
+        var categoryColors = {
+            'Natural Disaster': '#f44336',
+            'Geopolitical': '#ff9800', 
+            'Cyber Attack': '#9c27b0',
+            'Supply Shortage': '#2196f3',
+            'Labor Strike': '#4caf50',
+            'Transportation': '#CFB991'
+        };
+        
+        var datasets = [];
+        for (var i = 0; i < categories.length; i++) {
+            var cat = categories[i];
+            var data = [];
+            
+            for (var j = 0; j < regions.length; j++) {
+                var reg = regions[j];
+                data.push(matrix[reg] && matrix[reg][cat] ? matrix[reg][cat] : 0);
+            }
+            
+            datasets.push({
+                label: cat,
+                data: data,
+                backgroundColor: categoryColors[cat] || '#CFB991'
+            });
+        }
+        
+        var ctx = document.getElementById('regionalHeatmap').getContext('2d');
+        regionalHeatmapChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: regions,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { 
+                        stacked: true,
+                        ticks: { color: 'white' },
+                        grid: { color: 'rgba(207,185,145,0.1)' }
+                    },
+                    y: { 
+                        stacked: true,
+                        beginAtZero: true,
+                        ticks: { color: 'white', stepSize: 1 },
+                        grid: { color: 'rgba(207,185,145,0.1)' },
+                        title: { display: true, text: 'Number of Disruptions', color: 'white' }
+                    }
+                },
+                plugins: { 
+                    legend: { 
+                        labels: { color: 'white' },
+                        position: 'bottom'
                     }
                 }
-            };
-            xhr.send();
-        }
-        
-        // build the company table
-        function buildTable(companies) {
-            if (companies.length === 0) {
-                document.getElementById('tableWrapper').innerHTML = 
-                    '<p style="text-align:center;padding:40px;color:var(--text-light)">No disruption data found.</p>';
-                return;
             }
-            
-            // calculate time period in months
-            var start = new Date(document.getElementById('start_date').value);
-            var end = new Date(document.getElementById('end_date').value);
-            var months = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24 * 30)));
-            
-            var html = '<table><thead><tr><th>Company</th><th>Region</th><th>Tier Level</th><th>Disruption Count</th><th>Frequency Rate</th></tr></thead><tbody>';
-            
-            for (var i = 0; i < companies.length; i++) {
-                var c = companies[i];
-                var freq = (c.disruptionCount / months).toFixed(2);
-                
-                html += '<tr>' +
-                    '<td><strong>' + esc(c.CompanyName) + '</strong></td>' +
-                    '<td>' + esc(c.ContinentName) + '</td>' +
-                    '<td>Tier ' + c.TierLevel + '</td>' +
-                    '<td>' + c.disruptionCount + '</td>' +
-                    '<td>' + freq + ' / month</td>' +
-                    '</tr>';
-            }
-            
-            document.getElementById('tableWrapper').innerHTML = html + '</tbody></table>';
-        }
-        
-        // utility function
-        function esc(t) { 
-            if (!t) return '';
-            var d = document.createElement('div'); 
-            d.textContent = t; 
-            return d.innerHTML; 
-        }
-        
-        // event listeners
-        form.addEventListener('submit', function(e) { 
-            e.preventDefault(); 
-            load(); 
-            return false;
         });
-        
-        document.getElementById('clearBtn').addEventListener('click', function() {
-            document.getElementById('start_date').value = '<?= date('Y-m-d', strtotime('-1 year')) ?>';
-            document.getElementById('end_date').value = '<?= date('Y-m-d') ?>';
-            document.getElementById('company_id').value = '';
-            document.getElementById('region').value = '';
-            document.getElementById('tier').value = '';
-            load();
+    }
+    
+    // Update HDR Chart
+    function updateHDRChart(hdrData) {
+    if (hdrChart) hdrChart.destroy();
+    
+    if (!hdrData || hdrData.length === 0) {
+        return;
+    }
+    
+    // Calculate rates and create sortable array
+    var chartData = [];
+    for (var i = 0; i < hdrData.length; i++) {
+        var total = parseInt(hdrData[i].totalEvents);
+        var high = parseInt(hdrData[i].highImpactEvents);
+        var rate = total > 0 ? (high / total) * 100 : 0;
+        chartData.push({
+            label: hdrData[i].CategoryName,
+            rate: rate
         });
+    }
+    
+    // Sort by rate from highest to lowest
+    chartData.sort(function(a, b) {
+        return b.rate - a.rate;
+    });
+    
+    // Extract sorted data
+    var labels = [];
+    var rates = [];
+    var colors = [];
+    for (var i = 0; i < chartData.length; i++) {
+        labels.push(chartData[i].label);
+        rates.push(chartData[i].rate);
+        colors.push(chartData[i].rate > 40 ? '#f44336' : (chartData[i].rate > 20 ? '#ff9800' : '#4caf50'));
+    }
+    
+    var ctx = document.getElementById('hdrChart').getContext('2d');
+    hdrChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'High-Impact Rate (%)',
+                data: rates,
+                backgroundColor: colors
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { 
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: { color: 'white' },
+                    grid: { color: 'rgba(207,185,145,0.1)' },
+                    title: { display: true, text: 'Percentage (%)', color: 'white' }
+                },
+                x: { 
+                    ticks: { color: 'white', maxRotation: 45, minRotation: 45 },
+                    grid: { color: 'rgba(207,185,145,0.1)' }
+                }
+            },
+            plugins: { 
+                legend: { labels: { color: 'white' } }
+            }
+        }
+    });
+}
+    
+    // Update Severity Chart
+    function updateSeverityChart(severityData) {
+    if (severityChart) severityChart.destroy();
+    
+    if (!severityData || severityData.length === 0) {
+        return;
+    }
+    
+    var colorMap = {'Low': '#4caf50', 'Medium': '#ff9800', 'High': '#f44336'};
+    var severityLevels = ['Low', 'Medium', 'High'];
+    
+    // Extract unique time periods
+    var periods = [...new Set(severityData.map(item => item.period))].sort();
+    
+    // Create a dataset for each severity level
+    var datasets = severityLevels.map(function(level) {
+        return {
+            label: level,
+            data: periods.map(function(period) {
+                var item = severityData.find(d => d.ImpactLevel === level && d.period === period);
+                return item ? parseInt(item.eventCount) : 0;
+            }),
+            backgroundColor: colorMap[level]
+        };
+    });
+    
+    var ctx = document.getElementById('severityChart').getContext('2d');
+    severityChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: periods,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    stacked: true,
+                    ticks: { color: 'white' }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    ticks: { color: 'white' }
+                }
+            },
+            plugins: { 
+                legend: { 
+                    labels: { color: 'white' },
+                    position: 'bottom'
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                }
+            }
+        }
+    });
+}
+    
+    // Update ART Histogram
+    function updateARTHistogram(recoveryData) {
+        if (artHistogramChart) artHistogramChart.destroy();
         
-        // CRITICAL: Initialize charts on page load with PHP data
-        (function initCharts() {
-            var heatmapData = <?= json_encode($heatmapData) ?>;
-            var hdrData = <?= json_encode($hdrByCategory) ?>;
-            var severityData = <?= json_encode($severityDist) ?>;
-            
-            // Regional Risk Concentration Heatmap (Region x Category matrix)
-            // Build matrix structure
-            var regions = [];
-            var categories = [];
-            var matrix = {};
-            
-            // Extract unique regions and categories
-            for (var i = 0; i < heatmapData.length; i++) {
-                var region = heatmapData[i].Region;
-                var category = heatmapData[i].Category;
-                
-                if (regions.indexOf(region) === -1) regions.push(region);
-                if (categories.indexOf(category) === -1) categories.push(category);
-                
-                if (!matrix[region]) matrix[region] = {};
-                matrix[region][category] = parseInt(heatmapData[i].eventCount);
-            }
-            
-            // Create datasets for stacked bar chart (simulating heatmap)
-            var heatmapDatasets = [];
-            var categoryColors = {
-                'Natural Disaster': '#f44336',
-                'Geopolitical': '#ff9800', 
-                'Cyber Attack': '#9c27b0',
-                'Supply Shortage': '#2196f3',
-                'Labor Strike': '#4caf50',
-                'Transportation': '#CFB991'
-            };
-            
-            for (var i = 0; i < categories.length; i++) {
-                var cat = categories[i];
-                var data = [];
-                
-                for (var j = 0; j < regions.length; j++) {
-                    var reg = regions[j];
-                    data.push(matrix[reg] && matrix[reg][cat] ? matrix[reg][cat] : 0);
-                }
-                
-                heatmapDatasets.push({
-                    label: cat,
-                    data: data,
-                    backgroundColor: categoryColors[cat] || '#CFB991'
-                });
-            }
-            
-            var ctx1 = document.getElementById('regionalHeatmap').getContext('2d');
-            regionalChart = new Chart(ctx1, {
-                type: 'bar',
-                data: {
-                    labels: regions,
-                    datasets: heatmapDatasets
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: { 
-                            stacked: true,
-                            ticks: { color: 'white' },
-                            grid: { color: 'rgba(207,185,145,0.1)' }
-                        },
-                        y: { 
-                            stacked: true,
-                            beginAtZero: true,
-                            ticks: { color: 'white', stepSize: 1 },
-                            grid: { color: 'rgba(207,185,145,0.1)' },
-                            title: { display: true, text: 'Number of Disruptions', color: 'white' }
-                        }
-                    },
-                    plugins: { 
-                        legend: { 
-                            labels: { color: 'white' },
-                            position: 'bottom'
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    var label = context.dataset.label || '';
-                                    return label + ': ' + context.parsed.y + ' events';
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-            
-            // High-Impact Disruption Rate (HDR) by Category
-            var hdrLabels = [];
-            var hdrRates = [];
-            var hdrColors = [];
-            
-            for (var i = 0; i < hdrData.length; i++) {
-                hdrLabels.push(hdrData[i].CategoryName);
-                var total = parseInt(hdrData[i].totalEvents);
-                var high = parseInt(hdrData[i].highImpactEvents);
-                var rate = total > 0 ? (high / total) * 100 : 0;
-                hdrRates.push(rate);
-                hdrColors.push(rate > 40 ? '#f44336' : (rate > 20 ? '#ff9800' : '#4caf50'));
-            }
-            
-            var ctx2 = document.getElementById('hdrChart').getContext('2d');
-            new Chart(ctx2, {
-                type: 'bar',
-                data: {
-                    labels: hdrLabels,
-                    datasets: [{
-                        label: 'High-Impact Rate (%)',
-                        data: hdrRates,
-                        backgroundColor: hdrColors
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: { 
-                            beginAtZero: true,
-                            max: 100,
-                            ticks: { color: 'white' },
-                            grid: { color: 'rgba(207,185,145,0.1)' },
-                            title: { display: true, text: 'Percentage (%)', color: 'white' }
-                        },
-                        x: { 
-                            ticks: { color: 'white', maxRotation: 45, minRotation: 45 },
-                            grid: { color: 'rgba(207,185,145,0.1)' }
-                        }
-                    },
-                    plugins: { 
-                        legend: { labels: { color: 'white' } },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return 'HDR: ' + context.parsed.y.toFixed(1) + '%';
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-            
-            // Severity Distribution Chart
-            var severityLabels = [];
-            var severityCounts = [];
-            var severityColors = [];
-            var colorMap = {'Low': '#4caf50', 'Medium': '#ff9800', 'High': '#f44336'};
-            
-            for (var i = 0; i < severityData.length; i++) {
-                severityLabels.push(severityData[i].ImpactLevel);
-                severityCounts.push(parseInt(severityData[i].eventCount));
-                severityColors.push(colorMap[severityData[i].ImpactLevel] || '#CFB991');
-            }
-            
-            var ctx2 = document.getElementById('severityChart').getContext('2d');
-            severityChart = new Chart(ctx2, {
-                type: 'pie',
-                data: {
-                    labels: severityLabels,
-                    datasets: [{
-                        data: severityCounts,
-                        backgroundColor: severityColors
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { 
-                        legend: { 
-                            labels: { color: 'white' },
-                            position: 'bottom'
-                        } 
-                    }
-                }
-            });
-            
-            // ART Histogram
-            var recoveryData = <?= json_encode($recoveryTimes) ?>;
-            if (recoveryData && recoveryData.length > 0) {
-                // Create histogram bins
-                var bins = [0, 5, 10, 15, 20, 30, 60, 90];
-                var binLabels = ['0-5', '5-10', '10-15', '15-20', '20-30', '30-60', '60-90', '90+'];
-                var binCounts = new Array(binLabels.length).fill(0);
-                
-                for (var i = 0; i < recoveryData.length; i++) {
-                    var days = parseInt(recoveryData[i]);
-                    for (var j = 0; j < bins.length; j++) {
-                        if (j === bins.length - 1 || days < bins[j + 1]) {
-                            binCounts[j]++;
-                            break;
-                        }
-                    }
-                }
-                
-                var ctx3 = document.getElementById('artHistogram').getContext('2d');
-                new Chart(ctx3, {
-                    type: 'bar',
-                    data: {
-                        labels: binLabels,
-                        datasets: [{
-                            label: 'Number of Events',
-                            data: binCounts,
-                            backgroundColor: '#CFB991'
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        scales: {
-                            y: { 
-                                beginAtZero: true, 
-                                ticks: { color: 'white', stepSize: 1 }, 
-                                grid: { color: 'rgba(207,185,145,0.1)' },
-                                title: { display: true, text: 'Frequency', color: 'white' }
-                            },
-                            x: { 
-                                ticks: { color: 'white' }, 
-                                grid: { color: 'rgba(207,185,145,0.1)' },
-                                title: { display: true, text: 'Recovery Days', color: 'white' }
-                            }
-                        },
-                        plugins: { legend: { labels: { color: 'white' } } }
-                    }
-                });
-            }
-            
-            // TD Histogram (Downtime by Category)
-            var downtimeData = <?= json_encode($downtimeByCategory) ?>;
-            if (downtimeData && downtimeData.length > 0) {
-                var tdLabels = [];
-                var tdValues = [];
-                
-                for (var i = 0; i < downtimeData.length; i++) {
-                    tdLabels.push(downtimeData[i].CategoryName);
-                    tdValues.push(parseInt(downtimeData[i].totalDowntime));
-                }
-                
-                var ctx4 = document.getElementById('tdHistogram').getContext('2d');
-                new Chart(ctx4, {
-                    type: 'bar',
-                    data: {
-                        labels: tdLabels,
-                        datasets: [{
-                            label: 'Total Downtime (Days)',
-                            data: tdValues,
-                            backgroundColor: '#f44336'
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        indexAxis: 'y',
-                        scales: {
-                            x: { 
-                                beginAtZero: true, 
-                                ticks: { color: 'white' }, 
-                                grid: { color: 'rgba(207,185,145,0.1)' },
-                                title: { display: true, text: 'Total Downtime (Days)', color: 'white' }
-                            },
-                            y: { 
-                                ticks: { color: 'white' }, 
-                                grid: { color: 'rgba(207,185,145,0.1)' }
-                            }
-                        },
-                        plugins: { legend: { labels: { color: 'white' } } }
-                    }
-                });
-            }
-            
-            // DF Bar Chart (Disruption Frequency by Company)
-            var companyData = <?= json_encode($companies) ?>;
-            if (companyData && companyData.length > 0) {
-                var companyLabels = [];
-                var companyFreq = [];
-                var timeMonths = <?= $months ?>;
-                
-                // Take top 10 companies for readability in grid layout
-                var topCompanies = companyData.slice(0, 10);
-                
-                for (var i = 0; i < topCompanies.length; i++) {
-                    companyLabels.push(topCompanies[i].CompanyName);
-                    var freq = timeMonths > 0 ? topCompanies[i].disruptionCount / timeMonths : 0;
-                    companyFreq.push(freq);
-                }
-                
-                var ctx5 = document.getElementById('dfBarChart').getContext('2d');
-                new Chart(ctx5, {
-                    type: 'bar',
-                    data: {
-                        labels: companyLabels,
-                        datasets: [{
-                            label: 'Disruptions per Month',
-                            data: companyFreq,
-                            backgroundColor: '#CFB991'
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        indexAxis: 'y',
-                        scales: {
-                            x: { 
-                                beginAtZero: true, 
-                                ticks: { color: 'white' }, 
-                                grid: { color: 'rgba(207,185,145,0.1)' },
-                                title: { display: true, text: 'Events per Month', color: 'white' }
-                            },
-                            y: { 
-                                ticks: { color: 'white' }, 
-                                grid: { color: 'rgba(207,185,145,0.1)' }
-                            }
-                        },
-                        plugins: { legend: { labels: { color: 'white' } } }
-                    }
-                });
-            }
-        })();
+        if (!recoveryData || recoveryData.length === 0) {
+            return;
+        }
         
+        var bins = [0, 5, 10, 15, 20, 30, 60, 90];
+        var binLabels = ['0-5', '5-10', '10-15', '15-20', '20-30', '30-60', '60-90', '90+'];
+        var binCounts = new Array(binLabels.length).fill(0);
+        
+        for (var i = 0; i < recoveryData.length; i++) {
+            var days = parseInt(recoveryData[i]);
+            for (var j = 0; j < bins.length; j++) {
+                if (j === bins.length - 1 || days < bins[j + 1]) {
+                    binCounts[j]++;
+                    break;
+                }
+            }
+        }
+        
+        var ctx = document.getElementById('artHistogram').getContext('2d');
+        artHistogramChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: binLabels,
+                datasets: [{
+                    label: 'Number of Events',
+                    data: binCounts,
+                    backgroundColor: '#CFB991'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        ticks: { color: 'white', stepSize: 1 }, 
+                        grid: { color: 'rgba(207,185,145,0.1)' },
+                        title: { display: true, text: 'Frequency', color: 'white' }
+                    },
+                    x: { 
+                        ticks: { color: 'white' }, 
+                        grid: { color: 'rgba(207,185,145,0.1)' },
+                        title: { display: true, text: 'Recovery Days', color: 'white' }
+                    }
+                },
+                plugins: { legend: { labels: { color: 'white' } } }
+            }
+        });
+    }
+    
+    // Update TD Histogram
+    function updateTDHistogram(downtimeData) {
+        if (tdHistogramChart) tdHistogramChart.destroy();
+        
+        if (!downtimeData || downtimeData.length === 0) {
+            return;
+        }
+        
+        var labels = [];
+        var values = [];
+        
+        for (var i = 0; i < downtimeData.length; i++) {
+            labels.push(downtimeData[i].CategoryName);
+            values.push(parseInt(downtimeData[i].totalDowntime));
+        }
+        
+        var ctx = document.getElementById('tdHistogram').getContext('2d');
+        tdHistogramChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Total Downtime (Days)',
+                    data: values,
+                    backgroundColor: '#f44336'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                scales: {
+                    x: { 
+                        beginAtZero: true, 
+                        ticks: { color: 'white' }, 
+                        grid: { color: 'rgba(207,185,145,0.1)' },
+                        title: { display: true, text: 'Total Downtime (Days)', color: 'white' }
+                    },
+                    y: { 
+                        ticks: { color: 'white' }, 
+                        grid: { color: 'rgba(207,185,145,0.1)' }
+                    }
+                },
+                plugins: { legend: { labels: { color: 'white' } } }
+            }
+        });
+    }
+    
+    function updateTDHistogramRegion(downtimeDataRegion) {
+    if (tdHistogramRegion) tdHistogramRegion.destroy();
+    
+    if (!downtimeDataRegion || downtimeDataRegion.length === 0) {
+        return;
+    }
+    
+    // Aggregate downtime by region
+    var regionTotals = {};
+    for (var i = 0; i < downtimeDataRegion.length; i++) {
+        var region = downtimeDataRegion[i].RegionName; 
+        var downtime = parseInt(downtimeDataRegion[i].totalDowntime);
+        
+        if (regionTotals[region]) {
+            regionTotals[region] += downtime;
+        } else {
+            regionTotals[region] = downtime;
+        }
+    }
+    
+    // Convert to arrays and sort by downtime (highest to lowest)
+    var chartData = [];
+    for (var region in regionTotals) {
+        chartData.push({
+            label: region,
+            value: regionTotals[region]
+        });
+    }
+    chartData.sort(function(a, b) {
+        return b.value - a.value;
+    });
+    
+    var labels = [];
+    var values = [];
+    for (var i = 0; i < chartData.length; i++) {
+        labels.push(chartData[i].label);
+        values.push(chartData[i].value);
+    }
+    
+    var ctx = document.getElementById('tdHistogramRegion').getContext('2d');
+    tdHistogramRegion = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Total Downtime (Days)',
+                data: values,
+                backgroundColor: '#f44336'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            indexAxis: 'y',
+            scales: {
+                x: { 
+                    beginAtZero: true, 
+                    ticks: { color: 'white' }, 
+                    grid: { color: 'rgba(207,185,145,0.1)' },
+                    title: { display: true, text: 'Total Downtime (Days)', color: 'white' }
+                },
+                y: { 
+                    ticks: { color: 'white' }, 
+                    grid: { color: 'rgba(207,185,145,0.1)' }
+                }
+            },
+            plugins: { legend: { labels: { color: 'white' } } }
+        }
+    });
+}
+
+function updateTDHistogramTier(downtimeDataTier) {
+    if (tdHistogramTier) tdHistogramTier.destroy();
+    
+    if (!downtimeDataTier || downtimeDataTier.length === 0) {
+        return;
+    }
+    
+    // Create sortable array
+    var chartData = [];
+    for (var i = 0; i < downtimeDataTier.length; i++) {
+        chartData.push({
+            label: 'Tier ' + downtimeDataTier[i].TierLevel,
+            value: parseInt(downtimeDataTier[i].totalDowntime)
+        });
+    }
+    
+    // Sort by downtime from highest to lowest
+    chartData.sort(function(a, b) {
+        return b.value - a.value;
+    });
+    
+    var labels = [];
+    var values = [];
+    for (var i = 0; i < chartData.length; i++) {
+        labels.push(chartData[i].label);
+        values.push(chartData[i].value);
+    }
+    
+    var ctx = document.getElementById('tdHistogramTier').getContext('2d');
+    tdHistogramTier = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Total Downtime (Days)',
+                data: values,
+                backgroundColor: '#ff9800'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            indexAxis: 'y',
+            scales: {
+                x: { 
+                    beginAtZero: true, 
+                    ticks: { color: 'white' }, 
+                    grid: { color: 'rgba(207,185,145,0.1)' },
+                    title: { display: true, text: 'Total Downtime (Days)', color: 'white' }
+                },
+                y: { 
+                    ticks: { color: 'white' }, 
+                    grid: { color: 'rgba(207,185,145,0.1)' }
+                }
+            },
+            plugins: { legend: { labels: { color: 'white' } } }
+        }
+    });
+}
+
+    // Update DF Bar Chart
+    function updateDFBarChart(companyData) {
+        if (dfBarChart) dfBarChart.destroy();
+        
+        if (!companyData || companyData.length === 0) {
+            return;
+        }
+        
+        var start = new Date(document.getElementById('start_date').value);
+        var end = new Date(document.getElementById('end_date').value);
+        var months = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24 * 30)));
+        
+        var labels = [];
+        var freqData = [];
+        var topCompanies = companyData.slice(0, 10);
+        
+        for (var i = 0; i < topCompanies.length; i++) {
+            labels.push(topCompanies[i].CompanyName);
+            var freq = months > 0 ? topCompanies[i].disruptionCount / months : 0;
+            freqData.push(freq);
+        }
+        
+        var ctx = document.getElementById('dfBarChart').getContext('2d');
+        dfBarChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Disruptions per Month',
+                    data: freqData,
+                    backgroundColor: '#CFB991'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                scales: {
+                    x: { 
+                        beginAtZero: true, 
+                        ticks: { color: 'white' }, 
+                        grid: { color: 'rgba(207,185,145,0.1)' },
+                        title: { display: true, text: 'Events per Month', color: 'white' }
+                    },
+                    y: { 
+                        ticks: { color: 'white' }, 
+                        grid: { color: 'rgba(207,185,145,0.1)' }
+                    }
+                },
+                plugins: { legend: { labels: { color: 'white' } } }
+            }
+        });
+    }
+    
+    // Build the company table
+    function buildTable(companies) {
+        if (!companies || companies.length === 0) {
+            document.getElementById('tableWrapper').innerHTML = 
+                '<p style="text-align:center;padding:40px;color:var(--text-light)">No disruption data found.</p>';
+            return;
+        }
+        
+        var start = new Date(document.getElementById('start_date').value);
+        var end = new Date(document.getElementById('end_date').value);
+        var months = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24 * 30)));
+        
+        var html = '<table><thead><tr><th>Company</th><th>Region</th><th>Tier Level</th><th>Disruption Count</th><th>Frequency Rate</th></tr></thead><tbody>';
+        
+        for (var i = 0; i < companies.length; i++) {
+            var c = companies[i];
+            var freq = (c.disruptionCount / months).toFixed(2);
+            
+            html += '<tr>' +
+                '<td><strong>' + esc(c.CompanyName) + '</strong></td>' +
+                '<td>' + esc(c.ContinentName) + '</td>' +
+                '<td>Tier ' + c.TierLevel + '</td>' +
+                '<td>' + c.disruptionCount + '</td>' +
+                '<td>' + freq + ' / month</td>' +
+                '</tr>';
+        }
+        
+        document.getElementById('tableWrapper').innerHTML = html + '</tbody></table>';
+    }
+    
+    // Utility function for escaping HTML
+    function esc(t) { 
+        if (!t) return '';
+        var d = document.createElement('div'); 
+        d.textContent = t; 
+        return d.innerHTML; 
+    }
+    
+    // Event listeners
+    form.addEventListener('submit', function(e) { 
+        e.preventDefault(); 
+        return false;
+    });
+    
+    document.getElementById('clearBtn').addEventListener('click', function(e) {
+        e.preventDefault();
+        document.getElementById('start_date').value = '<?= date('Y-m-d', strtotime('-1 year')) ?>';
+        document.getElementById('end_date').value = '<?= date('Y-m-d') ?>';
+        document.getElementById('company_id').value = '';
+        document.getElementById('region').value = '';
+        document.getElementById('tier').value = '';
+        load();
+    });
+    
+    // Dynamic filter updates - trigger load() on any filter change
+    document.getElementById('start_date').addEventListener('change', load);
+    document.getElementById('end_date').addEventListener('change', load);
+    document.getElementById('company_id').addEventListener('change', load);
+    document.getElementById('region').addEventListener('change', load);
+    document.getElementById('tier').addEventListener('change', load);
+    
+    // Initialize charts on page load with PHP data
+    (function initCharts() {
+        var heatmapData = <?= json_encode($heatmapData) ?>;
+        var hdrData = <?= json_encode($hdrByCategory) ?>;
+        var severityData = <?= json_encode($severityDist) ?>;
+        var recoveryData = <?= json_encode($recoveryTimes) ?>;
+        var downtimeData = <?= json_encode($downtimeByCategory) ?>;
+        var downtimeDataRegion = <?= json_encode($downtimeByRegion) ?>;
+        var downtimeDataTier = <?= json_encode($downtimeByTier) ?>;
+        var companyData = <?= json_encode($companies) ?>;
+        
+        updateRegionalHeatmap(heatmapData);
+        updateHDRChart(hdrData);
+        updateSeverityChart(severityData);
+        updateARTHistogram(recoveryData);
+        updateTDHistogram(downtimeData);
+        updateTDHistogramRegion(downtimeDataRegion);
+        updateTDHistogramTier(downtimeDataTier);
+        updateDFBarChart(companyData);
     })();
-    </script>
+    
+})();
+</script>
 </body>
 </html>
