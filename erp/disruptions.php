@@ -222,13 +222,14 @@ if (isset($_GET['ajax'])) {
 
     <nav class="container sub-nav">
         <a href="dashboard.php">Dashboard</a>
+        <a href="companies.php">Company Financial Health</a>
         <a href="financial.php">Financial Health</a>
-        <a href="regional_disruptions.php">Regional Disruptions</a>
         <a href="critical_companies.php">Critical Companies</a>
+        <a href="regional_disruptions.php">Regional Disruptions</a>
         <a href="timeline.php">Disruption Timeline</a>
-        <a href="companies.php">Company List</a>
-        <a href="distributors.php">Distributors</a>
         <a href="disruptions.php" class="active">Disruption Analysis</a>
+        <a href="distributors.php">Distributors</a>
+        <a href="add_company.php">Add Company</a>
     </nav>
 
     <div class="container">

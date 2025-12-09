@@ -1,6 +1,6 @@
 <?php
-// companies.php - View and search all companies
-// updated: added product list to the view details modal
+// companies.php - Company Financial Health (List View)
+// Lists all companies with their health scores, allowing for deep dives
 
 require_once '../config.php';
 requireLogin();
@@ -17,14 +17,14 @@ $pdo = getPDO();
 // 1. AJAX HANDLER: "VIEW DETAILS" MODAL
 // =================================================================
 if (isset($_GET['ajax_view_id'])) {
-    // keeping errors off for json safety
+    // turn off errors so json/html fragment doesnt break
     error_reporting(0); 
     header('Content-Type: text/html; charset=utf-8');
 
     try {
         $id = intval($_GET['ajax_view_id']);
         
-        // 1. Basic Company Info
+        // basic info query
         $stmt = $pdo->prepare("
             SELECT c.*, l.City, l.CountryName, l.ContinentName 
             FROM Company c
@@ -34,7 +34,7 @@ if (isset($_GET['ajax_view_id'])) {
         $stmt->execute(array($id));
         $comp = $stmt->fetch();
 
-        // 2. Financial Info (Last 4)
+        // financial info - getting last 4 quarters
         $stmtFin = $pdo->prepare("
             SELECT * FROM FinancialReport 
             WHERE CompanyID = ? 
@@ -44,37 +44,30 @@ if (isset($_GET['ajax_view_id'])) {
         $stmtFin->execute(array($id));
         $reports = $stmtFin->fetchAll();
 
-        // 3. Products Supplied (NEW)
-        // joining products table to get names and categories
-        $prodSql = "SELECT p.ProductName, p.Category, sp.SupplyPrice
-                    FROM SuppliesProduct sp
-                    JOIN Product p ON sp.ProductID = p.ProductID
-                    WHERE sp.SupplierID = ?
-                    ORDER BY p.ProductName";
-        $stmtProds = $pdo->prepare($prodSql);
-        $stmtProds->execute(array($id));
-        $productList = $stmtProds->fetchAll();
-        $prodCount = count($productList);
+        // count products
+        $stmtProd = $pdo->prepare("SELECT COUNT(*) FROM SuppliesProduct WHERE SupplierID = ?");
+        $stmtProd->execute(array($id));
+        $prodCount = $stmtProd->fetchColumn();
 
         if ($comp) {
             echo "<div class='info-box'>";
             
-            // --- HEADER ---
+            // Header
             echo "<h3 style='color: var(--purdue-gold); border-bottom: 1px solid var(--purdue-gold); padding-bottom: 10px; margin-bottom: 15px;'>" . htmlspecialchars($comp['CompanyName']) . "</h3>";
             
-            // --- GRID LAYOUT (Info) ---
+            // Layout
             echo "<div class='grid-2' style='display: grid; grid-template-columns: 1fr 1fr; gap: 20px;'>";
                 
-                // Left Col
+                // Col 1
                 echo "<div>";
                 echo "<h5 class='text-muted' style='margin-bottom:10px;'>General Information</h5>";
                 echo "<p><strong>ID:</strong> " . $comp['CompanyID'] . "</p>";
                 echo "<p><strong>Type:</strong> " . htmlspecialchars($comp['Type']) . "</p>";
-                echo "<p><strong>Tier:</strong> Tier " . htmlspecialchars($comp['TierLevel']) . "</p>";
-                echo "<p><strong>Total Products:</strong> " . intval($prodCount) . "</p>";
+                echo "<p><strong>Tier:</strong> <span class='tier-badge'>Tier " . htmlspecialchars($comp['TierLevel']) . "</span></p>";
+                echo "<p><strong>Products Supplied:</strong> " . intval($prodCount) . "</p>";
                 echo "</div>";
 
-                // Right Col
+                // Col 2
                 $city = !empty($comp['City']) ? $comp['City'] : 'N/A';
                 $country = !empty($comp['CountryName']) ? $comp['CountryName'] : 'N/A';
                 $continent = !empty($comp['ContinentName']) ? $comp['ContinentName'] : 'N/A';
@@ -88,38 +81,12 @@ if (isset($_GET['ajax_view_id'])) {
 
             echo "</div>"; 
 
-            // --- PRODUCT LIST SECTION (NEW) ---
-            echo "<div style='margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(207, 185, 145, 0.3);'>";
-            echo "<h5 class='text-muted' style='margin-bottom:15px;'>Products Supplied</h5>";
-            
-            if ($prodCount > 0) {
-                echo "<div style='max-height: 200px; overflow-y: auto;'>";
-                echo "<table style='width:100%; margin-top:0; background:rgba(0,0,0,0.3); font-size: 0.9em;'>";
-                echo "<thead><tr>
-                        <th style='padding:8px;'>Product Name</th>
-                        <th style='padding:8px;'>Category</th>
-                        <th style='padding:8px;'>Price</th>
-                      </tr></thead>";
-                echo "<tbody>";
-                foreach ($productList as $p) {
-                    echo "<tr>";
-                    echo "<td style='padding:8px;'>" . htmlspecialchars($p['ProductName']) . "</td>";
-                    echo "<td style='padding:8px; color:#ccc;'>" . htmlspecialchars($p['Category']) . "</td>";
-                    echo "<td style='padding:8px; color: var(--purdue-gold);'>$" . number_format($p['SupplyPrice'], 2) . "</td>";
-                    echo "</tr>";
-                }
-                echo "</tbody></table>";
-                echo "</div>";
-            } else {
-                echo "<p class='text-muted'><em>No products listed for this supplier.</em></p>";
-            }
-            echo "</div>";
-
-            // --- FINANCIALS SECTION ---
+            // Financials Section
             echo "<div style='margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(207, 185, 145, 0.3);'>";
             echo "<h5 class='text-muted' style='margin-bottom:15px;'>Recent Financial Performance (Last 4 Quarters)</h5>";
             
             if (count($reports) > 0) {
+                // creating a mini table for the scores
                 echo "<table style='width:100%; margin-top:0; background:rgba(0,0,0,0.3);'>";
                 echo "<thead><tr>
                         <th style='padding:8px; font-size:0.9em;'>Period</th>
@@ -133,6 +100,7 @@ if (isset($_GET['ajax_view_id'])) {
                     $q = $r['Quarter'];
                     $score = floatval($r['HealthScore']);
                     
+                    // color logic
                     $hClass = 'health-bad';
                     $status = 'Critical';
                     if ($score >= 75) { $hClass = 'health-good'; $status = 'Healthy'; }
@@ -166,6 +134,7 @@ if (isset($_GET['ajax_view_id'])) {
 // 2. MAIN PAGE LOGIC (Search & List)
 // =================================================================
 
+// getting filters
 $companyId = isset($_GET['company_id']) ? $_GET['company_id'] : ''; 
 $filterType = isset($_GET['type']) ? $_GET['type'] : '';
 $filterTier = isset($_GET['tier']) ? $_GET['tier'] : '';
@@ -180,6 +149,7 @@ $sql = "SELECT c.CompanyID, c.CompanyName, c.Type, c.TierLevel,
 
 $params = array();
 
+// building params for safer sql
 if ($companyId !== '') { 
     $sql .= " AND c.CompanyID = ?"; 
     $params[] = $companyId; 
@@ -197,14 +167,14 @@ if ($filterRegion !== '') {
     $params[] = $filterRegion; 
 }
 
-// Default sort by ID
-$sql .= " ORDER BY c.CompanyID";
+$sql .= " ORDER BY c.CompanyName";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $companies = $stmt->fetchAll();
 
 // --- Bulk Fetch Latest Health Scores ---
+// getting these all at once to avoid n+1 problem in the loop
 $healthSQL = "
     SELECT CompanyID, HealthScore 
     FROM FinancialReport 
@@ -213,6 +183,7 @@ $healthSQL = "
 $healthStmt = $pdo->query($healthSQL);
 $allScores = $healthStmt->fetchAll();
 
+// hashing the scores for easy lookup
 $healthMap = array();
 foreach ($allScores as $row) {
     if (!isset($healthMap[$row['CompanyID']])) {
@@ -220,21 +191,23 @@ foreach ($allScores as $row) {
     }
 }
 
+// attach scores to companies array
 foreach ($companies as $key => $comp) {
     $companies[$key]['HealthScore'] = isset($healthMap[$comp['CompanyID']]) ? $healthMap[$comp['CompanyID']] : null;
 }
 
-// ajax return
+// return json if ajax
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json');
     echo json_encode(array('success' => true, 'companies' => $companies, 'count' => count($companies)));
     exit;
 }
 
-// Dropdown data
+// Getting Regions for Dropdown
 $regionStmt = $pdo->query("SELECT DISTINCT ContinentName FROM Location WHERE ContinentName IS NOT NULL ORDER BY ContinentName");
 $regions = $regionStmt->fetchAll();
 
+// Getting All Companies for Search Dropdown
 $compStmt = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName");
 $allCompanies = $compStmt->fetchAll();
 ?>
@@ -242,7 +215,7 @@ $allCompanies = $compStmt->fetchAll();
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Company List - ERP System</title>
+    <title>Company Financial Health - ERP System</title>
     <script src="../assets/forward_protection.js"></script>
     <link rel="stylesheet" href="../assets/styles.css">
     
@@ -292,9 +265,37 @@ $allCompanies = $compStmt->fetchAll();
             font-size: 1.2em;
             padding: 40px;
         }
-        .btn-sm {
-            padding: 6px 16px;
-            font-size: 0.9em;
+
+        /* Table Scroll Window (Standardized) */
+        .table-scroll-window {
+            height: 600px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            border: 1px solid rgba(207, 185, 145, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        .table-scroll-window table {
+            width: 100%;
+            margin-top: 0;
+            table-layout: auto; 
+        }
+        /* Sticky Header */
+        .table-scroll-window thead th {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            background-color: #1a1a1a; 
+            border-bottom: 3px solid var(--purdue-gold);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            color: #ffffff;
+            cursor: pointer; /* Clickable for sorting */
+        }
+        /* Visual indicator for sort */
+        .sort-indicator {
+            margin-left: 5px;
+            font-size: 0.8em;
+            color: var(--purdue-gold);
         }
     </style>
 </head>
@@ -311,18 +312,19 @@ $allCompanies = $compStmt->fetchAll();
 
     <nav class="container sub-nav">
         <a href="dashboard.php">Dashboard</a>
+        <a href="companies.php" class="active">Company Financial Health</a>
         <a href="financial.php">Financial Health</a>
-        <a href="regional_disruptions.php">Regional Disruptions</a>
         <a href="critical_companies.php">Critical Companies</a>
+        <a href="regional_disruptions.php">Regional Disruptions</a>
         <a href="timeline.php">Disruption Timeline</a>
-        <a href="companies.php" class="active">Company List</a>
-        <a href="distributors.php">Distributors</a>
         <a href="disruptions.php">Disruption Analysis</a>
+        <a href="distributors.php">Distributors</a>
+        <a href="add_company.php">Add Company</a>
     </nav>
 
     <div class="container">
         <div class="flex flex-between align-items-center mb-md">
-            <h2>Company List</h2>
+            <h2>Company Financial Health</h2>
             <a href="add_company.php" class="btn">+ Add New Company</a>
         </div>
 
@@ -377,14 +379,14 @@ $allCompanies = $compStmt->fetchAll();
             <div class="results-count" id="resultsCount">Loading...</div>
         </div>
 
-        <div id="tableContainer" class="overflow-x-auto">
-            <table class="company-table">
+        <div id="tableContainer" class="table-scroll-window">
+            <table class="company-table m-0">
                 <thead>
                     <tr>
                         <th onclick="sortTable(0)" data-sort="asc">ID <span class="sort-indicator">▲</span></th>
                         <th onclick="sortTable(1)" data-sort="asc">Company Name <span class="sort-indicator"></span></th>
                         <th onclick="sortTable(2)" data-sort="asc">Type <span class="sort-indicator"></span></th>
-                        <th onclick="sortTable(3)" data-sort="asc" style="min-width: 120px;">Tier <span class="sort-indicator"></span></th>
+                        <th onclick="sortTable(3)" data-sort="asc" style="white-space: nowrap; min-width: 80px;">Tier <span class="sort-indicator"></span></th>
                         <th onclick="sortTable(4)" data-sort="asc">Location <span class="sort-indicator"></span></th>
                         <th onclick="sortTable(5)" data-sort="asc">Region <span class="sort-indicator"></span></th>
                         <th onclick="sortTable(6)" data-sort="asc">Health Score <span class="sort-indicator"></span></th>
@@ -432,6 +434,7 @@ $allCompanies = $compStmt->fetchAll();
             var trVal = document.getElementById('tier').value;
             var rVal = document.getElementById('region').value;
 
+            // save settings
             sessionStorage.setItem('comp_id', cId);
             sessionStorage.setItem('comp_type', tVal);
             sessionStorage.setItem('comp_tier', trVal);
@@ -486,18 +489,18 @@ $allCompanies = $compStmt->fetchAll();
                 row.innerHTML = '<td>' + esc(comp.CompanyID) + '</td>' +
                     '<td><strong>' + esc(comp.CompanyName) + '</strong></td>' +
                     '<td>' + esc(comp.Type) + '</td>' +
-                    '<td>Tier ' + esc(comp.TierLevel) + '</td>' +
+                    '<td style="white-space: nowrap;"><span class="tier-badge">Tier ' + esc(comp.TierLevel) + '</span></td>' +
                     '<td>' + esc(city) + ', ' + esc(country) + '</td>' +
                     '<td>' + esc(continent) + '</td>' +
                     '<td>' + healthBadge + '</td>' + 
-                    '<td><button class="btn-secondary btn-sm" onclick="openModal(' + comp.CompanyID + ')">View Details</button></td>';
+                    '<td><button class="btn-secondary" onclick="openModal(' + comp.CompanyID + ')">View Details</button></td>';
                 tbody.appendChild(row);
             });
         }
         
         function esc(t) { if (!t) return ''; var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
         
-        // --- SORTING ---
+        // --- SORTING (Javascript Client Side for Speed) ---
         window.sortTable = function(columnIndex) {
             var table = document.querySelector('.company-table');
             var headers = table.querySelectorAll('th');
