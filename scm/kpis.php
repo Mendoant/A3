@@ -15,6 +15,8 @@ $pdo = getPDO();
 $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-1 year'));
 $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
 $companyID = isset($_GET['company_id']) ? $_GET['company_id'] : '';
+$region = isset($_GET['region']) ? $_GET['region'] : '';
+$tierLevel = isset($_GET['tier']) ? $_GET['tier'] : '';
 
 // Build WHERE clause for our queries
 $where = array("s.PromisedDate BETWEEN :start AND :end");
@@ -23,6 +25,25 @@ $params = array(':start' => $startDate, ':end' => $endDate);
 if (!empty($companyID)) {
     $where[] = "(s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
     $params[':companyID'] = $companyID;
+}
+
+// Add JOINs for region and tier filtering
+$joins = '';
+if (!empty($region) || !empty($tierLevel)) {
+    $joins = " LEFT JOIN Company c1 ON s.SourceCompanyID = c1.CompanyID
+               LEFT JOIN Location l1 ON c1.LocationID = l1.LocationID
+               LEFT JOIN Company c2 ON s.DestinationCompanyID = c2.CompanyID
+               LEFT JOIN Location l2 ON c2.LocationID = l2.LocationID";
+    
+    if (!empty($region)) {
+        $where[] = "(l1.ContinentName = :region OR l2.ContinentName = :region)";
+        $params[':region'] = $region;
+    }
+    
+    if (!empty($tierLevel)) {
+        $where[] = "(c1.TierLevel = :tier OR c2.TierLevel = :tier)";
+        $params[':tier'] = $tierLevel;
+    }
 }
 
 $whereClause = 'WHERE ' . implode(' AND ', $where);
@@ -35,6 +56,7 @@ $sql = "SELECT
             SUM(CASE WHEN s.ActualDate IS NOT NULL AND s.ActualDate <= s.PromisedDate THEN 1 ELSE 0 END) as onTime,
             SUM(CASE WHEN s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate THEN 1 ELSE 0 END) as `delayed`
         FROM Shipping s
+        $joins
         $whereClause AND s.ActualDate IS NOT NULL";
 
 $stmt = $pdo->prepare($sql);
@@ -51,6 +73,7 @@ $sql = "SELECT
             AVG(DATEDIFF(s.ActualDate, s.PromisedDate)) as avgDelay,
             STDDEV(DATEDIFF(s.ActualDate, s.PromisedDate)) as stdDelay
         FROM Shipping s
+        $joins
         $whereClause AND s.ActualDate IS NOT NULL AND s.ActualDate > s.PromisedDate";
 
 $stmt = $pdo->prepare($sql);
@@ -86,11 +109,25 @@ $sql = "SELECT
             SUM(CASE WHEN ic.ImpactLevel = 'High' THEN 1 ELSE 0 END) as highImpact
         FROM DisruptionEvent de
         JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
-        LEFT JOIN ImpactsCompany ic ON de.EventID = ic.EventID
-        WHERE de.EventDate BETWEEN :start AND :end";
+        LEFT JOIN ImpactsCompany ic ON de.EventID = ic.EventID";
+
+if (!empty($region) || !empty($tierLevel)) {
+    $sql .= " LEFT JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+              LEFT JOIN Location l ON c.LocationID = l.LocationID";
+}
+
+$sql .= " WHERE de.EventDate BETWEEN :start AND :end";
 
 if (!empty($companyID)) {
     $sql .= " AND ic.AffectedCompanyID = :companyID";
+}
+
+if (!empty($region)) {
+    $sql .= " AND l.ContinentName = :region";
+}
+
+if (!empty($tierLevel)) {
+    $sql .= " AND c.TierLevel = :tier";
 }
 
 $sql .= " GROUP BY dc.CategoryName ORDER BY eventCount DESC";
@@ -119,14 +156,16 @@ if (isset($_GET['ajax'])) {
             'stdDelay' => $delay['stdDelay'] ? round($delay['stdDelay'], 1) : 0,
             'financialHealth' => $financialHealth,
             'disruptions' => $disruptions,
+            'totalDisruptions' => $totalDisruptions,
             'companyName' => $companyName
         )
     ));
     exit;
 }
 
-// Get all companies for the dropdown (only needed on initial page load)
-$companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName")->fetchAll();
+// Get all companies and regions for the dropdowns (only needed on initial page load)
+$allCompanies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName")->fetchAll();
+$allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentName")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -232,34 +271,54 @@ $companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY Co
     </nav>
 
     <div class="container">
-        <h2>Key Performance Indicators</h2>
+        <h2 id="companyTitle"><?= $companyName ? 'KPIs for: ' . htmlspecialchars($companyName) : 'KPIs for All Companies' ?></h2>
 
         <div class="content-section">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 15px;">
-                <h3 id="companyTitle" style="margin: 0; color: var(--purdue-gold);">
-                    <?= $companyName ? 'KPIs for: ' . htmlspecialchars($companyName) : 'KPIs for All Companies' ?>
-                </h3>
-            </div>
-            
+            <h3>Filter KPIs</h3>
             <form id="filterForm">
                 <div class="filter-grid">
-                    <div><label>Start Date:</label><input type="date" id="start_date" value="<?= htmlspecialchars($startDate) ?>"></div>
-                    <div><label>End Date:</label><input type="date" id="end_date" value="<?= htmlspecialchars($endDate) ?>"></div>
                     <div>
-                        <label>Company (Optional):</label>
-                        <select id="company_id">
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Start Date:</label>
+                        <input type="date" id="start_date" value="<?= htmlspecialchars($startDate) ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                    </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">End Date:</label>
+                        <input type="date" id="end_date" value="<?= htmlspecialchars($endDate) ?>" required style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white;">
+                    </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Company (Optional):</label>
+                        <select id="company_id" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
                             <option value="">All Companies</option>
-                            <?php foreach ($companies as $c): ?>
+                            <?php foreach ($allCompanies as $c): ?>
                                 <option value="<?= $c['CompanyID'] ?>" <?= $companyID == $c['CompanyID'] ? 'selected' : '' ?>>
                                     <?= htmlspecialchars($c['CompanyName']) ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Region (Optional):</label>
+                        <select id="region" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                            <option value="">All Regions</option>
+                            <?php foreach ($allRegions as $r): ?>
+                                <option value="<?= $r['ContinentName'] ?>" <?= $region == $r['ContinentName'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($r['ContinentName']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="color: var(--text-light); display: block; margin-bottom: 5px;">Tier Level (Optional):</label>
+                        <select id="tier" style="padding: 8px; border-radius: 4px; border: 1px solid rgba(207,185,145,0.3); background: rgba(0,0,0,0.5); color: white; width: 100%;">
+                            <option value="">All Tiers</option>
+                            <option value="1" <?= $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
+                            <option value="2" <?= $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
+                            <option value="3" <?= $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
+                        </select>
+                    </div>
                 </div>
                 <div style="margin-top: 15px; display: flex; gap: 10px;">
-                    <button type="submit">Apply Filters</button>
-                    <button type="button" id="clearBtn" class="btn-secondary">Clear</button>
+                    <button type="button" id="clearBtn" class="btn-secondary">Clear Filter</button>
                 </div>
             </form>
         </div>
@@ -279,7 +338,12 @@ $companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY Co
             <div class="kpi-card">
                 <h3 id="kpi-avgdelay"><?= $delay['avgDelay'] ? round($delay['avgDelay'], 1) : 0 ?></h3>
                 <p>Avg Delay (Days)</p>
-                <small id="kpi-stddelay">±<?= $delay['stdDelay'] ? round($delay['stdDelay'], 1) : 0 ?> std dev</small>
+                <small>Delay Length</small>
+            </div>
+            <div class="kpi-card">
+                <h3 id="kpi-stddelay"><?= $delay['stdDelay'] ? round($delay['stdDelay'], 1) : 0 ?></h3>
+                <p>Standard Deviation</p>
+                <small>Delay Variation</small>
             </div>
             <div class="kpi-card">
                 <h3 id="kpi-disruptions"><?= $totalDisruptions ?></h3>
@@ -308,15 +372,16 @@ $companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY Co
 
     <script>
     (function() {
-        var form = document.getElementById('filterForm');
-        var disruptionChart = null; // keep track of chart instances so we can destroy and recreate them
+        var disruptionChart = null;
         var financialChart = null;
         
         // load KPI data via ajax
-        function load() {
+        function loadKPIs() {
             var params = 'ajax=1&start_date=' + encodeURIComponent(document.getElementById('start_date').value) +
                         '&end_date=' + encodeURIComponent(document.getElementById('end_date').value) +
-                        '&company_id=' + encodeURIComponent(document.getElementById('company_id').value);
+                        '&company_id=' + encodeURIComponent(document.getElementById('company_id').value) +
+                        '&region=' + encodeURIComponent(document.getElementById('region').value) +
+                        '&tier=' + encodeURIComponent(document.getElementById('tier').value);
             
             var xhr = new XMLHttpRequest();
             xhr.open('GET', 'kpis.php?' + params, true);
@@ -324,157 +389,39 @@ $companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY Co
                 if (xhr.status === 200) {
                     var r = JSON.parse(xhr.responseText);
                     if (r.success) {
-                        var kpi = r.kpis;
-                        
-                        // update title based on company selection
-                        document.getElementById('companyTitle').textContent = 
-                            kpi.companyName ? 'KPIs for: ' + kpi.companyName : 'KPIs for All Companies';
-                        
-                        // update KPI cards with new data
-                        document.getElementById('kpi-ontime').textContent = kpi.onTimeRate + '%';
-                        document.getElementById('kpi-ontime-detail').textContent = 
-                            kpi.onTimeDeliveries + ' on-time / ' + kpi.delayedDeliveries + ' delayed';
-                        document.getElementById('kpi-total').textContent = kpi.totalDeliveries;
-                        document.getElementById('kpi-avgdelay').textContent = kpi.avgDelay + ' days';
-                        document.getElementById('kpi-stddelay').textContent = 'Std Dev: ' + kpi.stdDelay + ' days';
-                        
-                        // calculate total disruptions from all categories
-                        var totalDisruptions = 0;
-                        for (var i = 0; i < kpi.disruptions.length; i++) {
-                            totalDisruptions += parseInt(kpi.disruptions[i].eventCount);
-                        }
-                        document.getElementById('kpi-disruptions').textContent = totalDisruptions;
-                        
-                        // build disruption chart data
-                        var categories = [];
-                        var counts = [];
-                        var highImpact = [];
-                        for (var i = 0; i < kpi.disruptions.length; i++) {
-                            categories.push(kpi.disruptions[i].CategoryName);
-                            counts.push(parseInt(kpi.disruptions[i].eventCount));
-                            highImpact.push(parseInt(kpi.disruptions[i].highImpact));
-                        }
-                        
-                        // destroy old chart if it exists (prevents memory leaks)
-                        if (disruptionChart) disruptionChart.destroy();
-                        
-                        var ctx1 = document.getElementById('disruptionChart').getContext('2d');
-                        disruptionChart = new Chart(ctx1, {
-                            type: 'bar',
-                            data: {
-                                labels: categories,
-                                datasets: [{
-                                    label: 'Total Events',
-                                    data: counts,
-                                    backgroundColor: '#CFB991'
-                                }, {
-                                    label: 'High Impact',
-                                    data: highImpact,
-                                    backgroundColor: '#f44336'
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                scales: {
-                                    y: { 
-                                        beginAtZero: true, 
-                                        ticks: { color: 'white', stepSize: 1 }, 
-                                        grid: { color: 'rgba(207,185,145,0.1)' } 
-                                    },
-                                    x: { 
-                                        ticks: { color: 'white' }, 
-                                        grid: { color: 'rgba(207,185,145,0.1)' } 
-                                    }
-                                },
-                                plugins: { legend: { labels: { color: 'white' } } }
-                            }
-                        });
-                        
-                        // financial health chart - only show if we have data (company selected)
-                        if (kpi.financialHealth.length > 0) {
-                            document.getElementById('financialSection').style.display = 'block';
-                            
-                            // reverse order so oldest quarter is on left (looks better on line charts)
-                            var labels = [];
-                            var scores = [];
-                            for (var i = kpi.financialHealth.length - 1; i >= 0; i--) {
-                                labels.push(kpi.financialHealth[i].Quarter + ' ' + kpi.financialHealth[i].RepYear);
-                                scores.push(parseFloat(kpi.financialHealth[i].HealthScore));
-                            }
-                            
-                            if (financialChart) financialChart.destroy();
-                            
-                            var ctx2 = document.getElementById('financialChart').getContext('2d');
-                            financialChart = new Chart(ctx2, {
-                                type: 'line',
-                                data: {
-                                    labels: labels,
-                                    datasets: [{
-                                        label: 'Health Score',
-                                        data: scores,
-                                        borderColor: '#CFB991',
-                                        backgroundColor: 'rgba(207,185,145,0.2)',
-                                        tension: 0.4,
-                                        fill: true
-                                    }]
-                                },
-                                options: {
-                                    responsive: true,
-                                    maintainAspectRatio: false,
-                                    scales: {
-                                        y: { 
-                                            beginAtZero: true, 
-                                            max: 100, 
-                                            ticks: { color: 'white' }, 
-                                            grid: { color: 'rgba(207,185,145,0.1)' } 
-                                        },
-                                        x: { 
-                                            ticks: { color: 'white' }, 
-                                            grid: { color: 'rgba(207,185,145,0.1)' } 
-                                        }
-                                    },
-                                    plugins: { legend: { labels: { color: 'white' } } }
-                                }
-                            });
-                        } else {
-                            // hide financial section if no company selected
-                            document.getElementById('financialSection').style.display = 'none';
-                        }
+                        updateDisplay(r.kpis);
                     }
                 }
             };
             xhr.send();
         }
         
-        // event listeners for filter form
-        form.addEventListener('submit', function(e) { 
-            e.preventDefault(); 
-            load(); 
-            return false; // extra insurance to prevent page reload
-        });
-        
-        document.getElementById('clearBtn').addEventListener('click', function() {
-            document.getElementById('start_date').value = '<?= date('Y-m-d', strtotime('-1 year')) ?>';
-            document.getElementById('end_date').value = '<?= date('Y-m-d') ?>';
-            document.getElementById('company_id').value = '';
-            load();
-        });
-        
-        // CRITICAL: Initialize charts on page load with PHP data
-        (function initCharts() {
-            var disruptionData = <?= json_encode($disruptions) ?>;
-            var financialData = <?= json_encode($financialHealth) ?>;
+        function updateDisplay(kpi) {
+            // update title based on company selection
+            document.getElementById('companyTitle').textContent = 
+                kpi.companyName ? 'KPIs for: ' + kpi.companyName : 'KPIs for All Companies';
             
-            // Build disruption chart
+            // update KPI cards with new data
+            document.getElementById('kpi-ontime').textContent = kpi.onTimeRate + '%';
+            document.getElementById('kpi-ontime-detail').textContent = 
+                kpi.onTimeDeliveries + ' on-time / ' + kpi.delayedDeliveries + ' delayed';
+            document.getElementById('kpi-total').textContent = kpi.totalDeliveries;
+            document.getElementById('kpi-avgdelay').textContent = kpi.avgDelay;
+            document.getElementById('kpi-stddelay').textContent = kpi.stdDelay;
+            document.getElementById('kpi-disruptions').textContent = kpi.totalDisruptions;
+            
+            // build disruption chart data
             var categories = [];
             var counts = [];
             var highImpact = [];
-            for (var i = 0; i < disruptionData.length; i++) {
-                categories.push(disruptionData[i].CategoryName);
-                counts.push(parseInt(disruptionData[i].eventCount));
-                highImpact.push(parseInt(disruptionData[i].highImpact));
+            for (var i = 0; i < kpi.disruptions.length; i++) {
+                categories.push(kpi.disruptions[i].CategoryName);
+                counts.push(parseInt(kpi.disruptions[i].eventCount));
+                highImpact.push(parseInt(kpi.disruptions[i].highImpact));
             }
+            
+            // destroy old chart if it exists
+            if (disruptionChart) disruptionChart.destroy();
             
             var ctx1 = document.getElementById('disruptionChart').getContext('2d');
             disruptionChart = new Chart(ctx1, {
@@ -509,14 +456,18 @@ $companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY Co
                 }
             });
             
-            // Build financial chart if data exists
-            if (financialData.length > 0) {
+            // financial health chart - only show if we have data
+            if (kpi.financialHealth.length > 0) {
+                document.getElementById('financialSection').style.display = 'block';
+                
                 var labels = [];
                 var scores = [];
-                for (var i = financialData.length - 1; i >= 0; i--) {
-                    labels.push(financialData[i].Quarter + ' ' + financialData[i].RepYear);
-                    scores.push(parseFloat(financialData[i].HealthScore));
+                for (var i = kpi.financialHealth.length - 1; i >= 0; i--) {
+                    labels.push(kpi.financialHealth[i].Quarter + ' ' + kpi.financialHealth[i].RepYear);
+                    scores.push(parseFloat(kpi.financialHealth[i].HealthScore));
                 }
+                
+                if (financialChart) financialChart.destroy();
                 
                 var ctx2 = document.getElementById('financialChart').getContext('2d');
                 financialChart = new Chart(ctx2, {
@@ -537,8 +488,8 @@ $companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY Co
                         maintainAspectRatio: false,
                         scales: {
                             y: { 
-                                beginAtZero: true,
-                                max: 100,
+                                beginAtZero: true, 
+                                max: 100, 
                                 ticks: { color: 'white' }, 
                                 grid: { color: 'rgba(207,185,145,0.1)' } 
                             },
@@ -550,9 +501,46 @@ $companies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY Co
                         plugins: { legend: { labels: { color: 'white' } } }
                     }
                 });
+            } else {
+                document.getElementById('financialSection').style.display = 'none';
             }
+        }
+        
+        // Initialize charts on page load with PHP data
+        (function initCharts() {
+            var disruptionData = <?= json_encode($disruptions) ?>;
+            var financialData = <?= json_encode($financialHealth) ?>;
+            var companyName = <?= json_encode($companyName) ?>;
+            
+            updateDisplay({
+                onTimeRate: <?= $onTimeRate ?>,
+                totalDeliveries: <?= intval($delivery['total']) ?>,
+                onTimeDeliveries: <?= intval($delivery['onTime']) ?>,
+                delayedDeliveries: <?= intval($delivery['delayed']) ?>,
+                avgDelay: <?= $delay['avgDelay'] ? round($delay['avgDelay'], 1) : 0 ?>,
+                stdDelay: <?= $delay['stdDelay'] ? round($delay['stdDelay'], 1) : 0 ?>,
+                totalDisruptions: <?= $totalDisruptions ?>,
+                disruptions: disruptionData,
+                financialHealth: financialData,
+                companyName: companyName
+            });
         })();
         
+        // Event listeners for dynamic updates
+        document.getElementById('start_date').addEventListener('change', loadKPIs);
+        document.getElementById('end_date').addEventListener('change', loadKPIs);
+        document.getElementById('company_id').addEventListener('change', loadKPIs);
+        document.getElementById('region').addEventListener('change', loadKPIs);
+        document.getElementById('tier').addEventListener('change', loadKPIs);
+        
+        document.getElementById('clearBtn').addEventListener('click', function() {
+            document.getElementById('start_date').value = '<?= date('Y-m-d', strtotime('-1 year')) ?>';
+            document.getElementById('end_date').value = '<?= date('Y-m-d') ?>';
+            document.getElementById('company_id').value = '';
+            document.getElementById('region').value = '';
+            document.getElementById('tier').value = '';
+            loadKPIs();
+        });
     })();
     </script>
 </body>
