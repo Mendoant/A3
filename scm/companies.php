@@ -13,6 +13,8 @@ if (hasRole('SeniorManager')) {
 
 $pdo = getPDO();
 
+$allCompanies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName")->fetchAll();
+
 // Handle AJAX request for detailed company info
 if (isset($_GET['detail_id'])) {
     try {
@@ -164,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Get filters
-$searchTerm = isset($_GET['search']) ? $_GET['search'] : '';
+$companyID = isset($_GET['company_id']) ? $_GET['company_id'] : '';
 $tierLevel = isset($_GET['tier']) ? $_GET['tier'] : '';
 $companyType = isset($_GET['type']) ? $_GET['type'] : '';
 $region = isset($_GET['region']) ? $_GET['region'] : '';
@@ -173,9 +175,9 @@ $region = isset($_GET['region']) ? $_GET['region'] : '';
 $where = array('1=1');
 $params = array();
 
-if (!empty($searchTerm)) {
-    $where[] = "c.CompanyName LIKE :search";
-    $params[':search'] = '%' . $searchTerm . '%';
+if (!empty($companyID)) {
+    $where[] = "c.CompanyID = :allCompanies";
+    $params[':allCompanies'] = $companyID;
 }
 if (!empty($tierLevel)) {
     $where[] = "c.TierLevel = :tier";
@@ -360,18 +362,17 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             <form id="filterForm">
                 <div class="filter-grid">
                     <div>
-                        <label>Search by Name:</label>
-                        <input type="text" id="search" placeholder="Enter company name..." value="<?= htmlspecialchars($searchTerm) ?>">
-                    </div>
-                    <div>
-                        <label>Tier Level:</label>
-                        <select id="tier">
-                            <option value="">All Tiers</option>
-                            <option value="1" <?= $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
-                            <option value="2" <?= $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
-                            <option value="3" <?= $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
+                        <label>Company Name:</label>
+                        <select id="company_id">
+                            <option value="">All Companies</option>
+                            <?php foreach ($allCompanies as $c): ?>
+                                <option value="<?= $c['CompanyID'] ?>" <?= $companyID == $c['CompanyID'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($c['CompanyName']) ?>
+                                </option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
+                   
                     <div>
                         <label>Company Type:</label>
                         <select id="type">
@@ -392,10 +393,19 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                             <?php endforeach; ?>
                         </select>
                     </div>
+
+                     <div>
+                        <label>Tier Level:</label>
+                        <select id="tier">
+                            <option value="">All Tiers</option>
+                            <option value="1" <?= $tierLevel == '1' ? 'selected' : '' ?>>Tier 1</option>
+                            <option value="2" <?= $tierLevel == '2' ? 'selected' : '' ?>>Tier 2</option>
+                            <option value="3" <?= $tierLevel == '3' ? 'selected' : '' ?>>Tier 3</option>
+                        </select>
+                    </div>
                 </div>
                 <div style="margin-top: 20px; display: flex; gap: 10px;">
-                    <button type="submit">Search</button>
-                    <button type="button" id="clearBtn" class="btn-secondary">Clear</button>
+                    <button type="button" id="clearBtn" class="btn-secondary">Clear Filter</button>
                 </div>
             </form>
         </div>
@@ -950,25 +960,25 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         var form = document.getElementById('filterForm');
         
         function load() {
-            document.getElementById('companyGrid').innerHTML = '<div class="loading" style="grid-column: 1/-1;">Loading...</div>';
-            
-            var params = 'ajax=1&search=' + encodeURIComponent(document.getElementById('search').value) +
-                        '&tier=' + encodeURIComponent(document.getElementById('tier').value) +
-                        '&type=' + encodeURIComponent(document.getElementById('type').value) +
-                        '&region=' + encodeURIComponent(document.getElementById('region').value);
-            
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', 'companies.php?' + params, true);
-            xhr.onload = function() {
-                if (xhr.status === 200) {
-                    var response = JSON.parse(xhr.responseText);
-                    if (response.success) {
-                        buildCards(response.companies);
-                    }
-                }
-            };
-            xhr.send();
+    document.getElementById('companyGrid').innerHTML = '<div class="loading" style="grid-column: 1/-1;">Loading...</div>';
+    
+    var params = 'ajax=1&company_id=' + encodeURIComponent(document.getElementById('company_id').value) +
+                '&tier=' + encodeURIComponent(document.getElementById('tier').value) +
+                '&type=' + encodeURIComponent(document.getElementById('type').value) +
+                '&region=' + encodeURIComponent(document.getElementById('region').value);
+    
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'companies.php?' + params, true);
+    xhr.onload = function() {
+        if (xhr.status === 200) {
+            var response = JSON.parse(xhr.responseText);
+            if (response.success) {
+                buildCards(response.companies);
+            }
         }
+    };
+    xhr.send();
+}
         
         function buildCards(companies) {
             document.getElementById('companyCount').textContent = companies.length;
@@ -1016,19 +1026,30 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             document.getElementById('companyGrid').innerHTML = html;
         }
         
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
+        // Remove form submit behavior entirely
+// Remove form submit behavior entirely
+        form.addEventListener('submit', function(e) { 
+            e.preventDefault(); 
             load();
             return false;
         });
-        
-        document.getElementById('clearBtn').addEventListener('click', function() {
-            document.getElementById('search').value = '';
+
+        // Clear/reset functionality
+        document.getElementById('clearBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            document.getElementById('company_id').value = '';
+            document.getElementById('region').value = '';
             document.getElementById('tier').value = '';
             document.getElementById('type').value = '';
-            document.getElementById('region').value = '';
             load();
         });
+
+        // Dynamic filter updates - trigger load() on any filter change
+        document.getElementById('company_id').addEventListener('input', load);
+        document.getElementById('region').addEventListener('change', load);
+        document.getElementById('tier').addEventListener('change', load);
+        document.getElementById('type').addEventListener('change', load);
+    
     })();
     </script>
 </body>
