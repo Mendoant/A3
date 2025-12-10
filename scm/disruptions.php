@@ -370,37 +370,36 @@ $stmt9 = $pdo->prepare($sql9);
 $stmt9->execute($params9);
 $downtimeByTier = $stmt9->fetchAll();
 
-// Get data for RRC heatmap (Region x Category matrix)
-$sql9 = "SELECT l.ContinentName as Region,
-                dc.CategoryName as Category,
+// Get data for Map (Country-level disruptions)
+// We need country name to map bubbles
+$sqlMap = "SELECT l.CountryName,
                 COUNT(DISTINCT de.EventID) as eventCount
          FROM DisruptionEvent de
          JOIN ImpactsCompany ic ON de.EventID = ic.EventID
          JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
          JOIN Location l ON c.LocationID = l.LocationID
-         JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
          WHERE de.EventDate BETWEEN :start AND :end";
 
-$params9 = array(':start' => $startDate, ':end' => $endDate);
+$paramsMap = array(':start' => $startDate, ':end' => $endDate);
 
 if (!empty($companyID)) {
-    $sql9 .= " AND c.CompanyID = :companyID";
-    $params9[':companyID'] = $companyID;
+    $sqlMap .= " AND c.CompanyID = :companyID";
+    $paramsMap[':companyID'] = $companyID;
 }
 if (!empty($region)) {
-    $sql9 .= " AND l.ContinentName = :region";
-    $params9[':region'] = $region;
+    $sqlMap .= " AND l.ContinentName = :region";
+    $paramsMap[':region'] = $region;
 }
 if (!empty($tierLevel)) {
-    $sql9 .= " AND c.TierLevel = :tier";
-    $params9[':tier'] = $tierLevel;
+    $sqlMap .= " AND c.TierLevel = :tier";
+    $paramsMap[':tier'] = $tierLevel;
 }
 
-$sql9 .= " GROUP BY l.ContinentName, dc.CategoryName ORDER BY l.ContinentName, dc.CategoryName";
+$sqlMap .= " GROUP BY l.CountryName ORDER BY eventCount DESC";
 
-$stmt9 = $pdo->prepare($sql9);
-$stmt9->execute($params9);
-$heatmapData = $stmt9->fetchAll();
+$stmtMap = $pdo->prepare($sqlMap);
+$stmtMap->execute($paramsMap);
+$mapData = $stmtMap->fetchAll();
 
 // Get HDR data by category for bar chart
 $sql10 = "SELECT dc.CategoryName,
@@ -498,11 +497,10 @@ if (isset($_GET['ajax'])) {
             'severityDist' => $severityDist,
             'recoveryTimes' => $recoveryTimes,
             'downtimeByCategory' => $downtimeByCategory,
-            'downtimeByRegion' => $downtimeByRegion,
-            'downtimeByTier' => $downtimeByTier,
-            'heatmapData' => $heatmapData,
-            'hdrByCategory' => $hdrByCategory,
-            'disruptionEvents' => $disruptionEvents
+            'downtimeByRegion' => $downtimeByRegion, //added for more data visibility
+            'downtimeByTier' => $downtimeByTier, //same as above
+            'mapData' => $mapData,
+            'hdrByCategory' => $hdrByCategory
         )
     ));
     exit;
@@ -519,6 +517,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
     <title>Disruptions - SCM</title>
     <link rel="stylesheet" href="../assets/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
         .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; }
         .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 30px 0; }
@@ -752,7 +751,6 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             </form>
         </div>
 
-        <!-- Key Metrics Cards -->
         <div class="metrics-grid">
             <div class="metric-card">
                 <h3 id="metric-total"><?= $totalEvents ?></h3>
@@ -779,9 +777,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
 
         
 
-        <!-- Charts Row -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
-            <!-- Disruption Frequency Bar Chart -->
             <div class="chart-container">
                 <h3>Disruption Frequency by Company (DF) - Top 15</h3>
                 <div class="chart-wrapper">
@@ -789,35 +785,30 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                 </div>
             </div>
 
-            <!-- Average Recovery Time Histogram -->
             <div class="chart-container">
                 <h3>Average Recovery Time Distribution (ART)</h3>
                 <div class="chart-wrapper">
                     <canvas id="artHistogram"></canvas>
                 </div>
             </div>
-            <!-- High-Impact Disruption Rate (HDR) by Category -->
             <div class="chart-container">
                 <h3>High-Impact Disruption Rate (HDR) by Category</h3>
                 <div class="chart-wrapper">
                     <canvas id="hdrChart"></canvas>
                 </div>
             </div>
-            <!-- Total Downtime Histogram -->
             <div class="chart-container">
                 <h3>Total Downtime Distribution (TD) by Disruption Category</h3>
                 <div class="chart-wrapper">
                     <canvas id="tdHistogram"></canvas>
                 </div>
             </div>
-            <!-- Total Downtime Histogram Region-->
             <div class="chart-container">
                 <h3>Total Downtime Distribution (TD) by Region</h3>
                 <div class="chart-wrapper">
                     <canvas id="tdHistogramRegion"></canvas>
                 </div>
             </div>
-            <!-- Total Downtime Histogram Tier-->
             <div class="chart-container">
                 <h3>Total Downtime Distribution (TD) by Tier</h3>
                 <div class="chart-wrapper">
@@ -826,14 +817,10 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             </div>
 
             
-            <!-- Regional Risk Concentration Heatmap -->
             <div class="chart-container">
                 <h3>Regional Risk Concentration (RRC) - Heatmap</h3>
-                <div class="chart-wrapper">
-                    <canvas id="regionalHeatmap"></canvas>
-                </div>
+                <div id="regionalMap" style="width:100%;height:350px;"></div>
             </div>
-            <!-- Disruption Severity Distribution Chart -->
             <div class="chart-container">
                 <h3>Disruption Severity Distribution (DSD) Monthly Trend</h3>
                 <div class="chart-wrapper">
@@ -844,7 +831,6 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             
         </div>
 
-        <!-- Company Disruption Frequency Table -->
         <div class="content-section">
             <h3>Disruption Frequency by Company (DF)</h3>
             <div class="table-scroll-wrapper">
@@ -948,7 +934,6 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
     var form = document.getElementById('filterForm');
     
     // Store chart instances globally so we can destroy and recreate them
-    var regionalHeatmapChart = null;
     var hdrChart = null;
     var severityChart = null;
     var artHistogramChart = null;
@@ -956,6 +941,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
     var tdHistogramRegion = null;
     var tdHistogramTier = null;
     var dfBarChart = null;
+    // Map doesn't use Chart.js instance, but we can manage it if needed
     
     // load disruption data via ajax
     function load() {
@@ -981,7 +967,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                     document.getElementById('metric-downtime').textContent = m.totalDowntime;
                     
                     // Update all charts
-                    updateRegionalHeatmap(m.heatmapData);
+                    updateRegionalMap(m.mapData);
                     updateHDRChart(m.hdrByCategory);
                     updateSeverityChart(m.severityDist);
                     updateARTHistogram(m.recoveryTimes);
@@ -999,87 +985,80 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         xhr.send();
     }
     
-    // Update Regional Heatmap Chart
-    function updateRegionalHeatmap(heatmapData) {
-        if (regionalHeatmapChart) regionalHeatmapChart.destroy();
-        
-        if (!heatmapData || heatmapData.length === 0) {
+    // Update Regional Map (Bubble Map)
+    function updateRegionalMap(mapData) {
+        if (!mapData || mapData.length === 0) {
+            Plotly.purge('regionalMap');
             return;
         }
-        
-        var regions = [];
-        var categories = [];
-        var matrix = {};
-        
-        for (var i = 0; i < heatmapData.length; i++) {
-            var region = heatmapData[i].Region;
-            var category = heatmapData[i].Category;
-            
-            if (regions.indexOf(region) === -1) regions.push(region);
-            if (categories.indexOf(category) === -1) categories.push(category);
-            
-            if (!matrix[region]) matrix[region] = {};
-            matrix[region][category] = parseInt(heatmapData[i].eventCount);
+
+        var locations = [];
+        var z = [];
+        var text = [];
+
+        for(var i=0; i < mapData.length; i++) {
+            locations.push(mapData[i].CountryName);
+            var count = parseInt(mapData[i].eventCount);
+            z.push(count);
+            text.push(mapData[i].CountryName + ': ' + count + ' Disruptions');
         }
-        
-        var categoryColors = {
-            'Natural Disaster': '#f44336',
-            'Geopolitical': '#ff9800', 
-            'Cyber Attack': '#9c27b0',
-            'Supply Shortage': '#2196f3',
-            'Labor Strike': '#4caf50',
-            'Transportation': '#CFB991'
-        };
-        
-        var datasets = [];
-        for (var i = 0; i < categories.length; i++) {
-            var cat = categories[i];
-            var data = [];
-            
-            for (var j = 0; j < regions.length; j++) {
-                var reg = regions[j];
-                data.push(matrix[reg] && matrix[reg][cat] ? matrix[reg][cat] : 0);
-            }
-            
-            datasets.push({
-                label: cat,
-                data: data,
-                backgroundColor: categoryColors[cat] || '#CFB991'
-            });
-        }
-        
-        var ctx = document.getElementById('regionalHeatmap').getContext('2d');
-        regionalHeatmapChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: regions,
-                datasets: datasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: { 
-                        stacked: true,
-                        ticks: { color: 'white' },
-                        grid: { color: 'rgba(207,185,145,0.1)' }
-                    },
-                    y: { 
-                        stacked: true,
-                        beginAtZero: true,
-                        ticks: { color: 'white', stepSize: 1 },
-                        grid: { color: 'rgba(207,185,145,0.1)' },
-                        title: { display: true, text: 'Number of Disruptions', color: 'white' }
-                    }
+
+        var data = [{
+            type: 'scattergeo',
+            mode: 'markers',
+            locations: locations,
+            locationmode: 'country names',
+            text: text,
+            marker: {
+                size: z,
+                // Scale the bubbles so they are visible but not huge
+                sizeref: 0.1, 
+                sizemode: 'area',
+                color: z,
+                colorscale: [
+                    [0, 'rgb(207, 185, 145)'], // Light Gold
+                    [1, 'rgb(220, 53, 69)']    // Red/Danger
+                ],
+                cmin: 0,
+                cmax: Math.max.apply(null, z),
+                line: {
+                    color: 'white',
+                    width: 1
                 },
-                plugins: { 
-                    legend: { 
-                        labels: { color: 'white' },
-                        position: 'bottom'
-                    }
+                colorbar: {
+                    title: 'Disruptions',
+                    thickness: 10,
+                    len: 0.8,
+                    tickfont: { color: 'white' },
+                    titlefont: { color: 'white' }
                 }
             }
-        });
+        }];
+
+        var layout = {
+            geo: {
+                scope: 'world',
+                resolution: 50,
+                showland: true,
+                landcolor: '#2E2E2E',
+                showocean: true,
+                oceancolor: '#111111',
+                showlakes: true,
+                lakecolor: '#111111',
+                bgcolor: 'rgba(0,0,0,0)',
+                projection: {
+                    type: 'equirectangular'
+                }
+            },
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            margin: { l: 0, r: 0, t: 0, b: 0 },
+            showlegend: false
+        };
+
+        var config = { responsive: true, displayModeBar: false };
+
+        Plotly.newPlot('regionalMap', data, layout, config);
     }
     
     // Update HDR Chart
@@ -1605,7 +1584,7 @@ function updateTDHistogramTier(downtimeDataTier) {
     
     // Initialize charts on page load with PHP data
     (function initCharts() {
-        var heatmapData = <?= json_encode($heatmapData) ?>;
+        var mapData = <?= json_encode($mapData) ?>;
         var hdrData = <?= json_encode($hdrByCategory) ?>;
         var severityData = <?= json_encode($severityDist) ?>;
         var recoveryData = <?= json_encode($recoveryTimes) ?>;
@@ -1615,7 +1594,7 @@ function updateTDHistogramTier(downtimeDataTier) {
         var companyData = <?= json_encode($companies) ?>;
         var eventsData = <?= json_encode($disruptionEvents) ?>;
         
-        updateRegionalHeatmap(heatmapData);
+        updateRegionalMap(mapData);
         updateHDRChart(hdrData);
         updateSeverityChart(severityData);
         updateARTHistogram(recoveryData);
