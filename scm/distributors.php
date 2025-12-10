@@ -289,7 +289,11 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             color: var(--purdue-gold); 
             font-weight: bold; 
             border-bottom: 2px solid var(--purdue-gold); 
-            white-space: nowrap; 
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 10;
         }
         td { 
             padding: 10px 12px; 
@@ -298,6 +302,12 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         }
         tbody tr:hover { 
             background: rgba(207,185,145,0.1); 
+        }
+        
+        #tableWrapper {
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
         }
     </style>
 </head>
@@ -460,7 +470,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         <!-- Distributor performance table -->
         <div class="content-section">
             <h3>Distributor Rankings (<span id="recordCount"><?= count($distributors) ?></span> distributors)</h3>
-            <div id="tableWrapper" style="overflow-x: auto;">
+            <div id="tableWrapper">
                 <?php if (count($distributors) > 0): ?>
                 <table>
                     <thead>
