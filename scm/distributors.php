@@ -434,7 +434,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             
             <!-- Tier Performance -->
             <div class="chart-container">
-                <h3>Performance by Tier Level</h3>
+                <h3>Shipment count and On-Time Performance</h3>
                 <div class="chart-wrapper">
                     <canvas id="tierChart"></canvas>
                 </div>
