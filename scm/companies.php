@@ -155,10 +155,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $companyID = $_POST['company_id'];
         $companyName = $_POST['company_name'];
         $tierLevel = $_POST['tier_level'];
+        $companyType = $_POST['company_type'];
+        $city = $_POST['city'];
+        $country = $_POST['country'];
+        $continent = $_POST['continent'];
         
-        $sql = "UPDATE Company SET CompanyName = :name, TierLevel = :tier WHERE CompanyID = :id";
+        // First, check if location exists or create it
+        $stmt = $pdo->prepare("SELECT LocationID FROM Location WHERE City = ? AND CountryName = ? AND ContinentName = ?");
+        $stmt->execute(array($city, $country, $continent));
+        $location = $stmt->fetch();
+        
+        if ($location) {
+            $locationID = $location['LocationID'];
+        } else {
+            // Insert new location
+            $stmt = $pdo->prepare("INSERT INTO Location (City, CountryName, ContinentName) VALUES (?, ?, ?)");
+            $stmt->execute(array($city, $country, $continent));
+            $locationID = $pdo->lastInsertId();
+        }
+        
+        // Update company
+        $sql = "UPDATE Company SET CompanyName = :name, TierLevel = :tier, Type = :type, LocationID = :location WHERE CompanyID = :id";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute(array(':name' => $companyName, ':tier' => $tierLevel, ':id' => $companyID));
+        $stmt->execute(array(':name' => $companyName, ':tier' => $tierLevel, ':type' => $companyType, ':location' => $locationID, ':id' => $companyID));
         
         header('Location: companies.php?updated=1');
         exit;
@@ -317,9 +336,9 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         table td { padding: 8px 10px; border-bottom: 1px solid rgba(207,185,145,0.1); }
         .chart-container { background: rgba(0,0,0,0.6); padding: 20px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); }
         .chart-wrapper { position: relative; height: 300px; }
-        .date-filter-bar { background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
+        .date-filter-bar { background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; border: 2px solid rgba(207,185,145,0.3); margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; font-size: 0.85em; }
         .date-filter-bar label { color: var(--purdue-gold); font-weight: bold; }
-        .date-filter-bar input { padding: 8px; border: 1px solid var(--purdue-gold); background: rgba(0,0,0,0.5); color: white; border-radius: 4px; }
+        .date-filter-bar input { padding: 6px; border: 1px solid var(--purdue-gold); background: rgba(0,0,0,0.5); color: white; border-radius: 4px; font-size: 0.9em; }
         .date-filter-bar button { padding: 8px 20px; background: var(--purdue-gold); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         .impact-high { background: #f44336; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; }
         .impact-medium { background: #ff9800; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; }
@@ -470,7 +489,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                         <!-- Actions -->
                         <div class="actions">
                             <button class="btn-details" onclick="showCompanyDetail(<?= $comp['CompanyID'] ?>)">📋 View Full Details</button>
-                            <a href="#" onclick="openEditModal(<?= $comp['CompanyID'] ?>, '<?= addslashes($comp['CompanyName']) ?>', <?= $comp['TierLevel'] ?>); return false;">✏️ Edit</a>
+                            <a href="#" onclick="openEditModal(<?= $comp['CompanyID'] ?>, '<?= addslashes($comp['CompanyName']) ?>', <?= $comp['TierLevel'] ?>, '<?= addslashes($comp['City']) ?>', '<?= addslashes($comp['CountryName']) ?>', '<?= addslashes($comp['ContinentName']) ?>', '<?= addslashes($comp['Type']) ?>'); return false;">✏️ Edit</a>
                         </div>
                     </div>
                     <?php endforeach; ?>
@@ -485,25 +504,67 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
 
     <!-- Edit Modal -->
     <div id="editModal" class="modal">
-        <div class="modal-content" style="max-width: 600px;">
-            <h3>Edit Company</h3>
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2>Edit Company Information</h2>
+                <button class="close-btn" onclick="closeEditModal()">✕ Close</button>
+            </div>
             <form method="POST" action="companies.php">
                 <input type="hidden" name="action" value="update_company">
                 <input type="hidden" name="company_id" id="edit_company_id">
                 
-                <label>Company Name:</label>
-                <input type="text" name="company_name" id="edit_company_name" required style="width: 100%; padding: 10px; margin: 10px 0; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px;">
-                
-                <label>Tier Level:</label>
-                <select name="tier_level" id="edit_tier_level" required style="width: 100%; padding: 10px; margin: 10px 0; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px;">
-                    <option value="1">Tier 1</option>
-                    <option value="2">Tier 2</option>
-                    <option value="3">Tier 3</option>
-                </select>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Company Name:</label>
+                    <input type="text" name="company_name" id="edit_company_name" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Company Type:</label>
+                        <select name="company_type" id="edit_company_type" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                            <option value="Manufacturer">Manufacturer</option>
+                            <option value="Distributor">Distributor</option>
+                            <option value="Retailer">Retailer</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Tier Level:</label>
+                        <select name="tier_level" id="edit_tier_level" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                            <option value="1">Tier 1</option>
+                            <option value="2">Tier 2</option>
+                            <option value="3">Tier 3</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">City:</label>
+                    <input type="text" name="city" id="edit_city" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Country:</label>
+                    <input type="text" name="country" id="edit_country" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Region (Continent):</label>
+                    <select name="continent" id="edit_continent" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                        <option value="">Select Region</option>
+                        <option value="Africa">Africa</option>
+                        <option value="Asia">Asia</option>
+                        <option value="Europe">Europe</option>
+                        <option value="North America">North America</option>
+                        <option value="South America">South America</option>
+                        <option value="Oceania">Oceania</option>
+                        <option value="Antarctica">Antarctica</option>
+                    </select>
+                </div>
                 
                 <div style="margin-top: 20px; display: flex; gap: 10px;">
-                    <button type="submit" style="padding: 10px 20px; background: var(--purdue-gold); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Save Changes</button>
-                    <button type="button" class="btn-secondary" onclick="closeEditModal()" style="padding: 10px 20px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(207,185,145,0.3); border-radius: 4px; cursor: pointer;">Cancel</button>
+                    <button type="submit" style="padding: 12px 24px; background: var(--purdue-gold); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1rem;">💾 Save Changes</button>
+                    <button type="button" onclick="closeEditModal()" style="padding: 12px 24px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(207,185,145,0.3); border-radius: 4px; cursor: pointer; font-size: 1rem;">Cancel</button>
                 </div>
             </form>
         </div>
@@ -520,9 +581,8 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             <!-- Date Range Filter for KPIs/Transactions -->
             <div class="date-filter-bar">
                 <label>Date Range for KPIs & Transactions:</label>
-                <label>Start: <input type="text" id="start_date" value="<?= date('Y-m-d', strtotime('-1 year')) ?>" readonly style="width: 150px;"></label>
-                <label>End: <input type="text" id="end_date" value="<?= date('Y-m-d') ?>" readonly style="width: 150px;"></label>
-                
+                <label>Start: <input type="text" id="start_date" value="<?= date('Y-m-d', strtotime('-1 year')) ?>" readonly></label>
+                <label>End: <input type="text" id="end_date" value="<?= date('Y-m-d') ?>" readonly></label>
             </div>
 
             <!-- Tabs for organizing information -->
@@ -898,15 +958,19 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
     }
 
     // Edit modal functions
-    function openEditModal(id, name, tier) {
+    function openEditModal(id, name, tier, city, country, continent, type) {
         document.getElementById('edit_company_id').value = id;
         document.getElementById('edit_company_name').value = name;
         document.getElementById('edit_tier_level').value = tier;
-        document.getElementById('editModal').style.display = 'block';
+        document.getElementById('edit_city').value = city;
+        document.getElementById('edit_country').value = country;
+        document.getElementById('edit_continent').value = continent;
+        document.getElementById('edit_company_type').value = type;
+        document.getElementById('editModal').classList.add('active');
     }
 
     function closeEditModal() {
-        document.getElementById('editModal').style.display = 'none';
+        document.getElementById('editModal').classList.remove('active');
     }
 
     // Utility functions
@@ -988,7 +1052,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                 
                 html += '<div class="actions">';
                 html += '<button class="btn-details" onclick="showCompanyDetail(' + c.CompanyID + ')">📋 View Full Details</button>';
-                html += '<a href="#" onclick="openEditModal(' + c.CompanyID + ', \'' + esc(c.CompanyName).replace(/'/g, "\\'") + '\', ' + c.TierLevel + '); return false;">✏️ Edit</a>';
+                html += '<a href="#" onclick="openEditModal(' + c.CompanyID + ', \'' + esc(c.CompanyName).replace(/'/g, "\\'") + '\', ' + c.TierLevel + ', \'' + esc(c.City).replace(/'/g, "\\'") + '\', \'' + esc(c.CountryName).replace(/'/g, "\\'") + '\', \'' + esc(c.ContinentName).replace(/'/g, "\\'") + '\', \'' + esc(c.Type).replace(/'/g, "\\'") + '\'); return false;">✏️ Edit</a>';
                 html += '</div></div>';
             });
             
@@ -996,7 +1060,6 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
         }
         
         // Remove form submit behavior entirely
-// Remove form submit behavior entirely
         form.addEventListener('submit', function(e) { 
             e.preventDefault(); 
             load();
