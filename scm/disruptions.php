@@ -779,7 +779,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             <div class="chart-container">
-                <h3>Disruption Frequency by Company (DF) - Top 15</h3>
+                <h3>Disruption Frequency by Company (DF) - Top 10</h3>
                 <div class="chart-wrapper">
                     <canvas id="dfBarChart"></canvas>
                 </div>
