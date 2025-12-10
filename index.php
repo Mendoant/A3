@@ -1,8 +1,10 @@
 <?php
 // index.php - Landing page showing group member photos and login form
-session_start();
 
-// If already logged in, redirect based on role
+// 1. Load config to start the specific named session (PHP 5.4 compatible)
+require_once 'config.php';
+
+// 2. Redirect if already logged in
 if (isset($_SESSION['Username']) && isset($_SESSION['Role'])) {
     if ($_SESSION['Role'] === 'SeniorManager') {
         header('Location: erp/dashboard.php');
@@ -13,7 +15,7 @@ if (isset($_SESSION['Username']) && isset($_SESSION['Role'])) {
     }
 }
 
-// member images in assets/images/
+// member images setup
 $group_members = array(
     array('name' => 'Anthony Mendoza', 'img' => 'assets/images/Anthony.jpg'),
     array('name' => 'Aytaj Aslanli',   'img' => 'assets/images/Aytaj.jpg'),
@@ -23,9 +25,12 @@ $group_members = array(
     array('name' => 'Zach Byington',   'img' => 'assets/images/Zach.jpg')
 );
 
-
-// Show any login error stored in session
+// 3. RETRIEVE SESSION ERROR
+// Because we included config.php, $_SESSION['login_error'] is now accessible.
 $login_error = isset($_SESSION['login_error']) ? $_SESSION['login_error'] : '';
+
+// 4. CLEAR SESSION ERROR
+// We remove it so it doesn't persist if the user refreshes the page.
 unset($_SESSION['login_error']);
 ?>
 <!doctype html>
@@ -37,8 +42,7 @@ unset($_SESSION['login_error']);
     <meta name="viewport" content="width=device-width,initial-scale=1">
 </head>
 <body>
-    <script src="../js/easter-egg.js"></script>
-
+    
 <header class="site-header">
     <h1>Group Project ERP / SCM</h1>
 </header>
@@ -65,38 +69,17 @@ unset($_SESSION['login_error']);
                 <input type="password" name="password" required>
             </label>
             <button type="submit" name="action" value="login">login</button>
+            
             <?php if ($login_error): ?>
-                <div class="login-feedback" id="loginFeedback"><?php echo htmlspecialchars($login_error) ?></div>
-            <?php else: ?>
-                <div class="login-feedback" id="loginFeedback"></div>
+                <div class="login-feedback" id="loginFeedback" style="color: red; margin-top: 10px;">
+                    <?php echo htmlspecialchars($login_error) ?>
+                </div>
             <?php endif; ?>
+            
         </form>
     </aside>
 </main>
 
 <script src="assets/app.js"></script>
-</aside>
-</main>
-
-<script src="assets/app.js"></script>
-
-<script>
-    let easterEggIndex = 0;
-    const secretCode = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '1'];
-
-    document.addEventListener('keydown', function(event) {
-        if (event.key === secretCode[easterEggIndex]) {
-            easterEggIndex++;
-            if (easterEggIndex === secretCode.length) {
-                window.location.href = "snake.php";
-            }
-        } else {
-            easterEggIndex = (event.key === secretCode[0]) ? 1 : 0;
-        }
-    });
-</script>
-
-</body>
-</html>
 </body>
 </html>
