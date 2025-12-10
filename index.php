@@ -37,7 +37,8 @@ unset($_SESSION['login_error']);
     <meta name="viewport" content="width=device-width,initial-scale=1">
 </head>
 <body>
-    
+    <script src="../js/easter-egg.js"></script>
+
 <header class="site-header">
     <h1>Group Project ERP / SCM</h1>
 </header>
@@ -74,5 +75,28 @@ unset($_SESSION['login_error']);
 </main>
 
 <script src="assets/app.js"></script>
+</aside>
+</main>
+
+<script src="assets/app.js"></script>
+
+<script>
+    let easterEggIndex = 0;
+    const secretCode = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '1'];
+
+    document.addEventListener('keydown', function(event) {
+        if (event.key === secretCode[easterEggIndex]) {
+            easterEggIndex++;
+            if (easterEggIndex === secretCode.length) {
+                window.location.href = "snake.php";
+            }
+        } else {
+            easterEggIndex = (event.key === secretCode[0]) ? 1 : 0;
+        }
+    });
+</script>
+
+</body>
+</html>
 </body>
 </html>
