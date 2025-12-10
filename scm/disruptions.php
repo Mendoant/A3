@@ -434,6 +434,54 @@ $stmt10 = $pdo->prepare($sql10);
 $stmt10->execute($params10);
 $hdrByCategory = $stmt10->fetchAll();
 
+// Get all disruption events with details
+$sqlEvents = "SELECT 
+                de.EventID,
+                de.EventDate,
+                de.EventRecoveryDate,
+                dc.CategoryName,
+                dc.Description as CategoryDescription,
+                GROUP_CONCAT(DISTINCT c.CompanyName ORDER BY c.CompanyName SEPARATOR ', ') as AffectedCompanies,
+                COUNT(DISTINCT ic.AffectedCompanyID) as CompanyCount,
+                MAX(ic.ImpactLevel) as MaxImpact,
+                CASE 
+                    WHEN de.EventRecoveryDate IS NULL THEN DATEDIFF(CURDATE(), de.EventDate)
+                    ELSE DATEDIFF(de.EventRecoveryDate, de.EventDate)
+                END as Duration,
+                CASE 
+                    WHEN de.EventRecoveryDate IS NULL THEN 'Ongoing'
+                    WHEN de.EventRecoveryDate >= CURDATE() THEN 'Ongoing'
+                    ELSE 'Recovered'
+                END as Status
+            FROM DisruptionEvent de
+            JOIN DisruptionCategory dc ON de.CategoryID = dc.CategoryID
+            JOIN ImpactsCompany ic ON de.EventID = ic.EventID
+            JOIN Company c ON ic.AffectedCompanyID = c.CompanyID
+            JOIN Location l ON c.LocationID = l.LocationID
+            WHERE de.EventDate BETWEEN :start AND :end";
+
+$paramsEvents = array(':start' => $startDate, ':end' => $endDate);
+
+if (!empty($companyID)) {
+    $sqlEvents .= " AND c.CompanyID = :companyID";
+    $paramsEvents[':companyID'] = $companyID;
+}
+if (!empty($region)) {
+    $sqlEvents .= " AND l.ContinentName = :region";
+    $paramsEvents[':region'] = $region;
+}
+if (!empty($tierLevel)) {
+    $sqlEvents .= " AND c.TierLevel = :tier";
+    $paramsEvents[':tier'] = $tierLevel;
+}
+
+$sqlEvents .= " GROUP BY de.EventID, de.EventDate, de.EventRecoveryDate, dc.CategoryName, dc.Description
+                ORDER BY de.EventDate DESC";
+
+$stmtEvents = $pdo->prepare($sqlEvents);
+$stmtEvents->execute($paramsEvents);
+$disruptionEvents = $stmtEvents->fetchAll();
+
 // AJAX response
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json');
@@ -450,10 +498,11 @@ if (isset($_GET['ajax'])) {
             'severityDist' => $severityDist,
             'recoveryTimes' => $recoveryTimes,
             'downtimeByCategory' => $downtimeByCategory,
-            'downtimeByRegion' => $downtimeByRegion, //added for more data visibility
-            'downtimeByTier' => $downtimeByTier, //same as above
+            'downtimeByRegion' => $downtimeByRegion,
+            'downtimeByTier' => $downtimeByTier,
             'heatmapData' => $heatmapData,
-            'hdrByCategory' => $hdrByCategory
+            'hdrByCategory' => $hdrByCategory,
+            'disruptionEvents' => $disruptionEvents
         )
     ));
     exit;
@@ -574,6 +623,8 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             font-size: 0.9rem;
             font-weight: bold;
         }
+        .status-ongoing { color: #ff6b6b; font-weight: bold; }
+        .status-recovered { color: #4caf50; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -696,7 +747,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                     </div>
                 </div>
                 <div style="margin-top: 15px; display: flex; gap: 10px;">
-                    <button type="button" id="clearBtn" class="btn-secondary">Clear FIlter</button>
+                    <button type="button" id="clearBtn" class="btn-secondary">Clear Filter</button>
                 </div>
             </form>
         </div>
@@ -836,6 +887,60 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             </div><!-- end tableWrapper -->
             </div><!-- end table-scroll-wrapper -->
         </div>
+
+        <!-- Disruption Events Detail List -->
+        <div class="content-section" style="margin-top: 30px;">
+            <h3>Disruption Events Detail</h3>
+            <div class="table-scroll-wrapper">
+                <div id="eventsTableWrapper" style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Event ID</th>
+                                <th>Category</th>
+                                <th>Event Date</th>
+                                <th>Recovery Date</th>
+                                <th>Duration (Days)</th>
+                                <th>Status</th>
+                                <th>Companies Affected</th>
+                                <th>Max Impact</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eventsTableBody">
+                            <?php if (count($disruptionEvents) > 0): ?>
+                                <?php foreach ($disruptionEvents as $event): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars($event['EventID']) ?></td>
+                                        <td><strong><?= htmlspecialchars($event['CategoryName']) ?></strong></td>
+                                        <td><?= htmlspecialchars(date('M d, Y', strtotime($event['EventDate']))) ?></td>
+                                        <td><?= $event['EventRecoveryDate'] ? htmlspecialchars(date('M d, Y', strtotime($event['EventRecoveryDate']))) : '<span style="color: #ff6b6b;">N/A</span>' ?></td>
+                                        <td><?= htmlspecialchars($event['Duration']) ?></td>
+                                        <td><span class="status-<?= strtolower($event['Status']) ?>"><?= htmlspecialchars($event['Status']) ?></span></td>
+                                        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="<?= htmlspecialchars($event['AffectedCompanies']) ?>">
+                                            <?= htmlspecialchars($event['AffectedCompanies']) ?> 
+                                            <?php if ($event['CompanyCount'] > 3): ?>
+                                                <small>(<?= $event['CompanyCount'] ?> total)</small>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <span class="badge impact-<?= strtolower($event['MaxImpact']) ?>" style="padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: bold;">
+                                                <?= htmlspecialchars($event['MaxImpact']) ?>
+                                            </span>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <tr>
+                                    <td colspan="8" style="text-align: center; padding: 40px; color: var(--text-light);">
+                                        No disruption events found for the selected filters.
+                                    </td>
+                                </tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -885,8 +990,9 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                     updateTDHistogramTier(m.downtimeByTier);
                     updateDFBarChart(m.companies);
                     
-                    // Rebuild table
+                    // Rebuild tables
                     buildTable(m.companies);
+                    buildEventsTable(m.disruptionEvents);
                 }
             }
         };
@@ -1423,6 +1529,49 @@ function updateTDHistogramTier(downtimeDataTier) {
         document.getElementById('tableWrapper').innerHTML = html + '</tbody></table>';
     }
     
+    // Build the disruption events table
+    function buildEventsTable(events) {
+        if (!events || events.length === 0) {
+            document.getElementById('eventsTableBody').innerHTML = 
+                '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-light)">No disruption events found.</td></tr>';
+            return;
+        }
+        
+        var html = '';
+        for (var i = 0; i < events.length; i++) {
+            var e = events[i];
+            var eventDate = new Date(e.EventDate);
+            var recoveryDate = e.EventRecoveryDate ? new Date(e.EventRecoveryDate) : null;
+            
+            var eventDateStr = eventDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            var recoveryDateStr = recoveryDate ? recoveryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '<span style="color: #ff6b6b;">N/A</span>';
+            
+            var statusClass = e.Status === 'Ongoing' ? 'status-ongoing' : 'status-recovered';
+            
+            var companiesDisplay = esc(e.AffectedCompanies);
+            if (e.CompanyCount > 3) {
+                companiesDisplay += ' <small>(' + e.CompanyCount + ' total)</small>';
+            }
+            
+            html += '<tr>' +
+                '<td>' + e.EventID + '</td>' +
+                '<td><strong>' + esc(e.CategoryName) + '</strong></td>' +
+                '<td>' + eventDateStr + '</td>' +
+                '<td>' + recoveryDateStr + '</td>' +
+                '<td>' + e.Duration + '</td>' +
+                '<td><span class="' + statusClass + '">' + esc(e.Status) + '</span></td>' +
+                '<td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + esc(e.AffectedCompanies) + '">' + 
+                    companiesDisplay + 
+                '</td>' +
+                '<td><span class="badge impact-' + e.MaxImpact.toLowerCase() + '" style="padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: bold;">' + 
+                    esc(e.MaxImpact) + 
+                '</span></td>' +
+                '</tr>';
+        }
+        
+        document.getElementById('eventsTableBody').innerHTML = html;
+    }
+    
     // Utility function for escaping HTML
     function esc(t) { 
         if (!t) return '';
@@ -1464,6 +1613,7 @@ function updateTDHistogramTier(downtimeDataTier) {
         var downtimeDataRegion = <?= json_encode($downtimeByRegion) ?>;
         var downtimeDataTier = <?= json_encode($downtimeByTier) ?>;
         var companyData = <?= json_encode($companies) ?>;
+        var eventsData = <?= json_encode($disruptionEvents) ?>;
         
         updateRegionalHeatmap(heatmapData);
         updateHDRChart(hdrData);
@@ -1473,6 +1623,7 @@ function updateTDHistogramTier(downtimeDataTier) {
         updateTDHistogramRegion(downtimeDataRegion);
         updateTDHistogramTier(downtimeDataTier);
         updateDFBarChart(companyData);
+        buildEventsTable(eventsData);
     })();
     
 })();

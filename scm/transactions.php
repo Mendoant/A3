@@ -1,5 +1,5 @@
 <?php
-// scm/transactions.php - All Transactions View with AJAX
+// scm/transactions.php - All Transactions View with AJAX and Edit Functionality
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
@@ -13,6 +13,100 @@ if (hasRole('SeniorManager')) {
 
 try {
     $pdo = getPDO();
+
+    // Handle transaction updates
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+        if ($_POST['action'] === 'update_shipping') {
+            $shipmentID = $_POST['shipment_id'];
+            $productID = $_POST['product_id'];
+            $sourceCompanyID = $_POST['source_company_id'];
+            $destinationCompanyID = $_POST['destination_company_id'];
+            $distributorID = !empty($_POST['distributor_id']) ? $_POST['distributor_id'] : null;
+            $quantity = $_POST['quantity'];
+            $promisedDate = $_POST['promised_date'];
+            $actualDate = !empty($_POST['actual_date']) ? $_POST['actual_date'] : null;
+            
+            $sql = "UPDATE Shipping SET 
+                    ProductID = :product,
+                    SourceCompanyID = :source,
+                    DestinationCompanyID = :destination,
+                    DistributorID = :distributor,
+                    Quantity = :quantity, 
+                    PromisedDate = :promised, 
+                    ActualDate = :actual 
+                    WHERE ShipmentID = :id";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array(
+                ':product' => $productID,
+                ':source' => $sourceCompanyID,
+                ':destination' => $destinationCompanyID,
+                ':distributor' => $distributorID,
+                ':quantity' => $quantity,
+                ':promised' => $promisedDate,
+                ':actual' => $actualDate,
+                ':id' => $shipmentID
+            ));
+            
+            header('Location: transactions.php?updated=shipping');
+            exit;
+        }
+        
+        if ($_POST['action'] === 'update_receiving') {
+            $receivingID = $_POST['receiving_id'];
+            $shipmentID = $_POST['shipment_id'];
+            $receiverCompanyID = $_POST['receiver_company_id'];
+            $quantityReceived = $_POST['quantity_received'];
+            $receivedDate = $_POST['received_date'];
+            
+            // Update Receiving table
+            $sql = "UPDATE Receiving SET 
+                    ShipmentID = :shipment,
+                    ReceiverCompanyID = :receiver,
+                    QuantityReceived = :quantity, 
+                    ReceivedDate = :date 
+                    WHERE ReceivingID = :id";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array(
+                ':shipment' => $shipmentID,
+                ':receiver' => $receiverCompanyID,
+                ':quantity' => $quantityReceived,
+                ':date' => $receivedDate,
+                ':id' => $receivingID
+            ));
+            
+            header('Location: transactions.php?updated=receiving');
+            exit;
+        }
+        
+        if ($_POST['action'] === 'update_adjustment') {
+            $adjustmentID = $_POST['adjustment_id'];
+            $companyID = $_POST['company_id'];
+            $productID = $_POST['product_id'];
+            $quantityChange = $_POST['quantity_change'];
+            $adjustmentDate = $_POST['adjustment_date'];
+            $reason = $_POST['reason'];
+            
+            $sql = "UPDATE InventoryAdjustment SET 
+                    CompanyID = :company,
+                    ProductID = :product,
+                    QuantityChange = :quantity, 
+                    AdjustmentDate = :date, 
+                    Reason = :reason 
+                    WHERE AdjustmentID = :id";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array(
+                ':company' => $companyID,
+                ':product' => $productID,
+                ':quantity' => $quantityChange,
+                ':date' => $adjustmentDate,
+                ':reason' => $reason,
+                ':id' => $adjustmentID
+            ));
+            
+            header('Location: transactions.php?updated=adjustment');
+            exit;
+        }
+    }
 
     // Get filters - default to last 3 months
     $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-3 months'));
@@ -75,6 +169,7 @@ try {
     // Shipping Transactions - Get paginated data
     $shippingOffset = ($shippingPage - 1) * $pageSize;
     $shippingSql = "SELECT s.ShipmentID, s.PromisedDate, s.ActualDate, s.Quantity,
+                           s.ProductID, s.SourceCompanyID, s.DestinationCompanyID, s.DistributorID,
                            p.ProductName, p.Category,
                            src.CompanyName as SourceCompany,
                            dest.CompanyName as DestCompany,
@@ -166,7 +261,10 @@ try {
     // Receiving Transactions - Get paginated data
     $receivingOffset = ($receivingPage - 1) * $pageSize;
     $receivingSql = "SELECT r.ReceivingID, r.ReceivedDate, r.QuantityReceived,
+                            r.ShipmentID, r.ReceiverCompanyID,
+                            s.ProductID,
                             p.ProductName, p.Category,
+                            s.SourceCompanyID,
                             src.CompanyName as SourceCompany,
                             recv.CompanyName as ReceiverCompany
                      FROM Receiving r
@@ -238,6 +336,7 @@ try {
     // Inventory Adjustments - Get paginated data
     $adjustmentsOffset = ($adjustmentsPage - 1) * $pageSize;
     $adjustmentsSql = "SELECT ia.AdjustmentID, ia.AdjustmentDate, ia.QuantityChange, ia.Reason,
+                              ia.CompanyID, ia.ProductID,
                               p.ProductName, p.Category,
                               c.CompanyName
                        FROM InventoryAdjustment ia
@@ -367,42 +466,7 @@ try {
     $stmtOnTimeRate->execute($whereParams);
     $onTimeRateData = $stmtOnTimeRate->fetchAll();
     
-    // 3. Shipment Status Distribution
-    $statusSql = "SELECT 
-                    CASE 
-                        WHEN s.ActualDate IS NOT NULL THEN 'Delivered'
-                        WHEN s.PromisedDate < CURDATE() THEN 'Delayed'
-                        ELSE 'In Transit'
-                    END as status,
-                    COUNT(*) as count
-                  FROM Shipping s
-                  JOIN Company src ON s.SourceCompanyID = src.CompanyID
-                  JOIN Company dest ON s.DestinationCompanyID = dest.CompanyID";
-    
-    if (!empty($region) || !empty($tierLevel)) {
-        $statusSql .= " LEFT JOIN Location srcLoc ON src.LocationID = srcLoc.LocationID
-                        LEFT JOIN Location destLoc ON dest.LocationID = destLoc.LocationID";
-    }
-    
-    $statusSql .= " WHERE s.PromisedDate BETWEEN :start AND :end";
-    
-    if (!empty($companyID)) {
-        $statusSql .= " AND (s.SourceCompanyID = :companyID OR s.DestinationCompanyID = :companyID)";
-    }
-    if (!empty($region)) {
-        $statusSql .= " AND (srcLoc.ContinentName = :region OR destLoc.ContinentName = :region)";
-    }
-    if (!empty($tierLevel)) {
-        $statusSql .= " AND (src.TierLevel = :tier OR dest.TierLevel = :tier)";
-    }
-    
-    $statusSql .= " GROUP BY status";
-    
-    $stmtStatus = $pdo->prepare($statusSql);
-    $stmtStatus->execute($whereParams);
-    $statusData = $stmtStatus->fetchAll();
-    
-    // 4. Top Products Handled (by volume)
+    // 3. Top Products Handled (by volume)
     $productsSql = "SELECT 
                         p.ProductName,
                         p.Category,
@@ -438,7 +502,7 @@ try {
     $stmtProducts->execute($whereParams);
     $productsData = $stmtProducts->fetchAll();
     
-    // 5. Disruption Exposure Score (total disruptions + 2 * high impact events)
+    // 4. Disruption Exposure Score (total disruptions + 2 * high impact events)
     $disruptionSql = "SELECT 
                         DATE_FORMAT(de.EventDate, '%Y-%m') as month,
                         COUNT(DISTINCT de.EventID) as total_disruptions,
@@ -498,7 +562,6 @@ try {
                 'charts' => array(
                     'volume' => $volumeData,
                     'onTimeRate' => $onTimeRateData,
-                    'status' => $statusData,
                     'products' => $productsData,
                     'disruption' => $disruptionData
                 ),
@@ -530,6 +593,20 @@ try {
     // Get all companies and regions for the dropdowns (only needed on initial page load)
     $allCompanies = $pdo->query("SELECT CompanyID, CompanyName FROM Company ORDER BY CompanyName")->fetchAll();
     $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY ContinentName")->fetchAll();
+    
+    // Get all products for dropdown
+    $allProducts = $pdo->query("SELECT ProductID, ProductName, Category FROM Product ORDER BY ProductName")->fetchAll();
+    
+    // Get all distributors for dropdown
+    $allDistributors = $pdo->query("SELECT c.CompanyID, c.CompanyName FROM Distributor d JOIN Company c ON d.CompanyID = c.CompanyID ORDER BY c.CompanyName")->fetchAll();
+    
+    // Get all shipments for receiving dropdown (ShipmentID with product and source info)
+    $allShipments = $pdo->query("SELECT s.ShipmentID, p.ProductName, c.CompanyName as SourceCompany, s.ProductID, s.SourceCompanyID 
+                                 FROM Shipping s 
+                                 JOIN Product p ON s.ProductID = p.ProductID 
+                                 JOIN Company c ON s.SourceCompanyID = c.CompanyID 
+                                 ORDER BY s.ShipmentID DESC 
+                                 LIMIT 500")->fetchAll();
 
 } catch (Exception $e) {
     if (isset($_GET['ajax'])) {
@@ -539,8 +616,7 @@ try {
     }
     die("Database error: " . $e->getMessage());
 }
-?>
-<!DOCTYPE html>
+?><!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -713,6 +789,30 @@ try {
             position: relative;
             height: 300px;
         }
+
+        /* Edit Modal Styles */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; overflow-y: auto; }
+        .modal.active { display: block; }
+        .modal-content { background: #1a1a1a; border: 2px solid var(--purdue-gold); border-radius: 8px; max-width: 600px; margin: 30px auto; padding: 30px; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { color: var(--purdue-gold); margin: 0; }
+        .close-btn { background: #f44336; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; }
+        .close-btn:hover { background: #d32f2f; }
+
+        .edit-btn {
+            padding: 6px 12px;
+            background: rgba(207,185,145,0.2);
+            border: 1px solid var(--purdue-gold);
+            color: var(--purdue-gold);
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            transition: all 0.3s;
+        }
+        .edit-btn:hover {
+            background: var(--purdue-gold);
+            color: black;
+        }
     </style>
 </head>
 <body>
@@ -738,6 +838,12 @@ try {
 
     <div class="container">
         <h2>All Transactions</h2>
+
+        <?php if (isset($_GET['updated'])): ?>
+        <div style="background: rgba(76,175,80,0.2); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <p style="margin: 0; color: #4caf50;">✓ Transaction updated successfully!</p>
+        </div>
+        <?php endif; ?>
 
         <!-- Date Filter -->
         <div class="content-section">
@@ -831,14 +937,6 @@ try {
                     </div>
                 </div>
                 
-                <!-- Shipment Status Distribution -->
-                <div class="chart-card">
-                    <h3>Shipment Status Distribution</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="statusChart"></canvas>
-                    </div>
-                </div>
-                
                 <!-- Top Products Handled -->
                 <div class="chart-card">
                     <h3>Top 10 Products by Volume</h3>
@@ -848,7 +946,7 @@ try {
                 </div>
                 
                 <!-- Disruption Exposure Score -->
-                <div class="chart-card" style="grid-column: span 2;">
+                <div class="chart-card">
                     <h3>Disruption Exposure Score (Disruptions + 2×High Impact)</h3>
                     <div class="chart-wrapper">
                         <canvas id="disruptionChart"></canvas>
@@ -925,6 +1023,236 @@ try {
         </div>
     </div>
 
+    <!-- Edit Shipping Modal -->
+    <div id="editShippingModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2>Edit Shipping Transaction</h2>
+                <button class="close-btn" onclick="closeEditModal('shipping')">✕ Close</button>
+            </div>
+            <form method="POST" action="transactions.php">
+                <input type="hidden" name="action" value="update_shipping">
+                <input type="hidden" name="shipment_id" id="edit_shipment_id">
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Product:</label>
+                    <select name="product_id" id="edit_product_id" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                        <option value="">Select Product</option>
+                        <?php foreach ($allProducts as $prod): ?>
+                            <option value="<?= $prod['ProductID'] ?>">
+                                <?= htmlspecialchars($prod['ProductName']) ?> (<?= htmlspecialchars($prod['Category']) ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Source Company:</label>
+                        <select name="source_company_id" id="edit_source_company_id" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                            <option value="">Select Source</option>
+                            <?php foreach ($allCompanies as $c): ?>
+                                <option value="<?= $c['CompanyID'] ?>">
+                                    <?= htmlspecialchars($c['CompanyName']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Destination Company:</label>
+                        <select name="destination_company_id" id="edit_destination_company_id" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                            <option value="">Select Destination</option>
+                            <?php foreach ($allCompanies as $c): ?>
+                                <option value="<?= $c['CompanyID'] ?>">
+                                    <?= htmlspecialchars($c['CompanyName']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Distributor (Optional):</label>
+                    <select name="distributor_id" id="edit_distributor_id" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                        <option value="">Direct (No Distributor)</option>
+                        <?php foreach ($allDistributors as $dist): ?>
+                            <option value="<?= $dist['CompanyID'] ?>">
+                                <?= htmlspecialchars($dist['CompanyName']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Quantity:</label>
+                    <input type="number" name="quantity" id="edit_quantity" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Promised Date:</label>
+                        <input type="date" name="promised_date" id="edit_promised_date" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                    </div>
+
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Actual Date (Optional):</label>
+                        <input type="date" name="actual_date" id="edit_actual_date" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px; display: flex; gap: 10px;">
+                    <button type="submit" style="padding: 12px 24px; background: var(--purdue-gold); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1rem;">💾 Save Changes</button>
+                    <button type="button" onclick="closeEditModal('shipping')" style="padding: 12px 24px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(207,185,145,0.3); border-radius: 4px; cursor: pointer; font-size: 1rem;">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Receiving Modal -->
+    <div id="editReceivingModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2>Edit Receiving Transaction</h2>
+                <button class="close-btn" onclick="closeEditModal('receiving')">✕ Close</button>
+            </div>
+            <form method="POST" action="transactions.php">
+                <input type="hidden" name="action" value="update_receiving">
+                <input type="hidden" name="receiving_id" id="edit_receiving_id">
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Shipment (Product & Source):</label>
+                    <select name="shipment_id" id="edit_shipment_id" required onchange="updateReceivingProductInfo()" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                        <option value="">Select Shipment</option>
+                        <?php foreach ($allShipments as $ship): ?>
+                            <option value="<?= $ship['ShipmentID'] ?>" 
+                                    data-product-id="<?= $ship['ProductID'] ?>"
+                                    data-product-name="<?= htmlspecialchars($ship['ProductName']) ?>"
+                                    data-source-id="<?= $ship['SourceCompanyID'] ?>"
+                                    data-source-name="<?= htmlspecialchars($ship['SourceCompany']) ?>">
+                                Shipment #<?= $ship['ShipmentID'] ?> - <?= htmlspecialchars($ship['ProductName']) ?> from <?= htmlspecialchars($ship['SourceCompany']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin: 5px 0 0 0;">This determines the Product and Source Company</p>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Product:</label>
+                        <input type="text" id="display_product_name" disabled style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(207,185,145,0.2); color: rgba(255,255,255,0.6); border-radius: 4px; font-size: 1rem;" value="(Select shipment first)">
+                    </div>
+
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Source Company:</label>
+                        <input type="text" id="display_source_company" disabled style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(207,185,145,0.2); color: rgba(255,255,255,0.6); border-radius: 4px; font-size: 1rem;" value="(Select shipment first)">
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Receiver Company:</label>
+                    <select name="receiver_company_id" id="edit_receiver_company_id" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                        <option value="">Select Receiver</option>
+                        <?php foreach ($allCompanies as $c): ?>
+                            <option value="<?= $c['CompanyID'] ?>">
+                                <?= htmlspecialchars($c['CompanyName']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Quantity Received:</label>
+                        <input type="number" name="quantity_received" id="edit_quantity_received" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                    </div>
+
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Received Date:</label>
+                        <input type="date" name="received_date" id="edit_received_date" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px; display: flex; gap: 10px;">
+                    <button type="submit" style="padding: 12px 24px; background: var(--purdue-gold); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1rem;">💾 Save Changes</button>
+                    <button type="button" onclick="closeEditModal('receiving')" style="padding: 12px 24px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(207,185,145,0.3); border-radius: 4px; cursor: pointer; font-size: 1rem;">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Adjustment Modal -->
+    <div id="editAdjustmentModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2>Edit Inventory Adjustment</h2>
+                <button class="close-btn" onclick="closeEditModal('adjustment')">✕ Close</button>
+            </div>
+            <form method="POST" action="transactions.php">
+                <input type="hidden" name="action" value="update_adjustment">
+                <input type="hidden" name="adjustment_id" id="edit_adjustment_id">
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Company:</label>
+                    <select name="company_id" id="edit_adjustment_company_id" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                        <option value="">Select Company</option>
+                        <?php foreach ($allCompanies as $c): ?>
+                            <option value="<?= $c['CompanyID'] ?>">
+                                <?= htmlspecialchars($c['CompanyName']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Product:</label>
+                    <select name="product_id" id="edit_adjustment_product_id" required onchange="updateAdjustmentCategory()" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                        <option value="">Select Product</option>
+                        <?php foreach ($allProducts as $prod): ?>
+                            <option value="<?= $prod['ProductID'] ?>" data-category="<?= htmlspecialchars($prod['Category']) ?>">
+                                <?= htmlspecialchars($prod['ProductName']) ?> (<?= htmlspecialchars($prod['Category']) ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Category:</label>
+                    <input type="text" id="display_adjustment_category" disabled style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(207,185,145,0.2); color: rgba(255,255,255,0.6); border-radius: 4px; font-size: 1rem;" value="(Select product first)">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Quantity Change:</label>
+                        <input type="number" name="quantity_change" id="edit_quantity_change" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                        <p style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin: 5px 0 0 0;">Positive for restocks, negative for adjustments</p>
+                    </div>
+
+                    <div>
+                        <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Type:</label>
+                        <input type="text" id="display_adjustment_type" disabled style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(207,185,145,0.2); color: rgba(255,255,255,0.6); border-radius: 4px; font-size: 1rem;" value="(Based on quantity)">
+                        <p style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin: 5px 0 0 0;">Auto-calculated from quantity</p>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Adjustment Date:</label>
+                    <input type="date" name="adjustment_date" id="edit_adjustment_date" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;">
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: var(--purdue-gold); font-weight: bold; margin-bottom: 5px;">Reason:</label>
+                    <textarea name="reason" id="edit_reason" rows="3" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(207,185,145,0.3); color: white; border-radius: 4px; font-size: 1rem;"></textarea>
+                </div>
+                
+                <div style="margin-top: 20px; display: flex; gap: 10px;">
+                    <button type="submit" style="padding: 12px 24px; background: var(--purdue-gold); color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1rem;">💾 Save Changes</button>
+                    <button type="button" onclick="closeEditModal('adjustment')" style="padding: 12px 24px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(207,185,145,0.3); border-radius: 4px; cursor: pointer; font-size: 1rem;">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
     (function() {
         var currentTab = 'shipping';
@@ -939,9 +1267,107 @@ try {
         var charts = {
             volume: null,
             onTimeRate: null,
-            status: null,
             products: null,
             disruption: null
+        };
+        
+        // Edit modal functions
+        window.openEditShippingModal = function(id, productID, sourceID, destID, distID, quantity, promisedDate, actualDate) {
+            document.getElementById('edit_shipment_id').value = id;
+            document.getElementById('edit_product_id').value = productID;
+            document.getElementById('edit_source_company_id').value = sourceID;
+            document.getElementById('edit_destination_company_id').value = destID;
+            document.getElementById('edit_distributor_id').value = distID || '';
+            document.getElementById('edit_quantity').value = quantity;
+            document.getElementById('edit_promised_date').value = promisedDate;
+            document.getElementById('edit_actual_date').value = actualDate || '';
+            document.getElementById('editShippingModal').classList.add('active');
+        };
+
+        window.openEditReceivingModal = function(id, shipmentID, receiverID, quantity, receivedDate, productName, sourceName) {
+            document.getElementById('edit_receiving_id').value = id;
+            document.getElementById('edit_shipment_id').value = shipmentID;
+            document.getElementById('edit_receiver_company_id').value = receiverID;
+            document.getElementById('edit_quantity_received').value = quantity;
+            document.getElementById('edit_received_date').value = receivedDate;
+            
+            // Update display fields
+            document.getElementById('display_product_name').value = productName;
+            document.getElementById('display_source_company').value = sourceName;
+            
+            document.getElementById('editReceivingModal').classList.add('active');
+        };
+
+        window.updateReceivingProductInfo = function() {
+            var select = document.getElementById('edit_shipment_id');
+            var selectedOption = select.options[select.selectedIndex];
+            
+            if (selectedOption.value) {
+                document.getElementById('display_product_name').value = selectedOption.getAttribute('data-product-name');
+                document.getElementById('display_source_company').value = selectedOption.getAttribute('data-source-name');
+            } else {
+                document.getElementById('display_product_name').value = '(Select shipment first)';
+                document.getElementById('display_source_company').value = '(Select shipment first)';
+            }
+        };
+
+        window.openEditAdjustmentModal = function(id, companyID, productID, quantityChange, adjustmentDate, reason, category) {
+            document.getElementById('edit_adjustment_id').value = id;
+            document.getElementById('edit_adjustment_company_id').value = companyID;
+            document.getElementById('edit_adjustment_product_id').value = productID;
+            document.getElementById('edit_quantity_change').value = quantityChange;
+            document.getElementById('edit_adjustment_date').value = adjustmentDate;
+            document.getElementById('edit_reason').value = reason || '';
+            
+            // Update display fields
+            document.getElementById('display_adjustment_category').value = category;
+            
+            // Update type display
+            var type = quantityChange > 0 ? 'Restock' : 'Adjustment';
+            document.getElementById('display_adjustment_type').value = type;
+            
+            document.getElementById('editAdjustmentModal').classList.add('active');
+        };
+
+        window.updateAdjustmentCategory = function() {
+            var select = document.getElementById('edit_adjustment_product_id');
+            var selectedOption = select.options[select.selectedIndex];
+            
+            if (selectedOption.value) {
+                document.getElementById('display_adjustment_category').value = selectedOption.getAttribute('data-category');
+            } else {
+                document.getElementById('display_adjustment_category').value = '(Select product first)';
+            }
+        };
+
+        // Update type display when quantity changes
+        document.addEventListener('DOMContentLoaded', function() {
+            var quantityInput = document.getElementById('edit_quantity_change');
+            if (quantityInput) {
+                quantityInput.addEventListener('input', function() {
+                    var qty = parseInt(this.value);
+                    var typeDisplay = document.getElementById('display_adjustment_type');
+                    if (typeDisplay) {
+                        if (qty > 0) {
+                            typeDisplay.value = 'Restock';
+                        } else if (qty < 0) {
+                            typeDisplay.value = 'Adjustment';
+                        } else {
+                            typeDisplay.value = '(Based on quantity)';
+                        }
+                    }
+                });
+            }
+        });
+
+        window.closeEditModal = function(type) {
+            if (type === 'shipping') {
+                document.getElementById('editShippingModal').classList.remove('active');
+            } else if (type === 'receiving') {
+                document.getElementById('editReceivingModal').classList.remove('active');
+            } else if (type === 'adjustment') {
+                document.getElementById('editAdjustmentModal').classList.remove('active');
+            }
         };
         
         // Load transaction data via AJAX
@@ -1005,11 +1431,14 @@ try {
             
             var html = '<table><thead><tr>' +
                 '<th>Shipment ID</th><th>Product</th><th>Category</th><th>Source</th><th>Destination</th>' +
-                '<th>Distributor</th><th>Quantity</th><th>Promised Date</th><th>Actual Date</th><th>Status</th>' +
+                '<th>Distributor</th><th>Quantity</th><th>Promised Date</th><th>Actual Date</th><th>Status</th><th>Actions</th>' +
                 '</tr></thead><tbody>';
             
             data.forEach(function(row) {
                 var statusClass = row.Status.toLowerCase().replace(/\s+/g, '');
+                var actualDate = row.ActualDate || '';
+                var distID = row.DistributorID || '';
+                
                 html += '<tr>' +
                     '<td>' + row.ShipmentID + '</td>' +
                     '<td>' + escapeHtml(row.ProductName) + '</td>' +
@@ -1021,6 +1450,15 @@ try {
                     '<td>' + row.PromisedDate + '</td>' +
                     '<td>' + (row.ActualDate || '-') + '</td>' +
                     '<td><span class="status-badge status-' + statusClass + '">' + escapeHtml(row.Status) + '</span></td>' +
+                    '<td><button class="edit-btn" onclick="openEditShippingModal(' + 
+                        row.ShipmentID + ', ' + 
+                        row.ProductID + ', ' + 
+                        row.SourceCompanyID + ', ' + 
+                        row.DestinationCompanyID + ', ' + 
+                        (distID ? distID : 'null') + ', ' + 
+                        row.Quantity + ', \'' + 
+                        row.PromisedDate + '\', \'' + 
+                        actualDate + '\')">✏️ Edit</button></td>' +
                     '</tr>';
             });
             
@@ -1040,7 +1478,7 @@ try {
             
             var html = '<table><thead><tr>' +
                 '<th>Receiving ID</th><th>Product</th><th>Category</th><th>Source Company</th>' +
-                '<th>Receiver Company</th><th>Quantity Received</th><th>Received Date</th>' +
+                '<th>Receiver Company</th><th>Quantity Received</th><th>Received Date</th><th>Actions</th>' +
                 '</tr></thead><tbody>';
             
             data.forEach(function(row) {
@@ -1052,6 +1490,14 @@ try {
                     '<td>' + escapeHtml(row.ReceiverCompany) + '</td>' +
                     '<td>' + formatNumber(row.QuantityReceived) + '</td>' +
                     '<td>' + row.ReceivedDate + '</td>' +
+                    '<td><button class="edit-btn" onclick="openEditReceivingModal(' + 
+                        row.ReceivingID + ', ' + 
+                        row.ShipmentID + ', ' + 
+                        row.ReceiverCompanyID + ', ' + 
+                        row.QuantityReceived + ', \'' + 
+                        row.ReceivedDate + '\', \'' + 
+                        escapeHtml(row.ProductName).replace(/'/g, "\\'") + '\', \'' + 
+                        escapeHtml(row.SourceCompany).replace(/'/g, "\\'") + '\')">✏️ Edit</button></td>' +
                     '</tr>';
             });
             
@@ -1071,13 +1517,14 @@ try {
             
             var html = '<table><thead><tr>' +
                 '<th>Adjustment ID</th><th>Date</th><th>Company</th><th>Product</th><th>Category</th>' +
-                '<th>Type</th><th>Quantity Change</th><th>Reason</th>' +
+                '<th>Type</th><th>Quantity Change</th><th>Reason</th><th>Actions</th>' +
                 '</tr></thead><tbody>';
             
             data.forEach(function(row) {
                 var typeClass = row.Type.toLowerCase();
                 var changeColor = row.QuantityChange > 0 ? '#4caf50' : '#f44336';
                 var changePrefix = row.QuantityChange > 0 ? '+' : '';
+                var reason = row.Reason || '';
                 
                 html += '<tr>' +
                     '<td>' + row.AdjustmentID + '</td>' +
@@ -1088,6 +1535,14 @@ try {
                     '<td><span class="type-badge type-' + typeClass + '">' + escapeHtml(row.Type) + '</span></td>' +
                     '<td style="color: ' + changeColor + '">' + changePrefix + formatNumber(row.QuantityChange) + '</td>' +
                     '<td>' + (row.Reason ? escapeHtml(row.Reason) : '-') + '</td>' +
+                    '<td><button class="edit-btn" onclick="openEditAdjustmentModal(' + 
+                        row.AdjustmentID + ', ' + 
+                        row.CompanyID + ', ' + 
+                        row.ProductID + ', ' + 
+                        row.QuantityChange + ', \'' + 
+                        row.AdjustmentDate + '\', \'' + 
+                        reason.replace(/'/g, "\\'") + '\', \'' + 
+                        escapeHtml(row.Category).replace(/'/g, "\\'") + '\')">✏️ Edit</button></td>' +
                     '</tr>';
             });
             
@@ -1218,38 +1673,6 @@ try {
                 }
             });
             
-            // 3. Status Distribution Chart
-            if (charts.status) charts.status.destroy();
-            var statusLabels = chartData.status.map(function(d) { return d.status; });
-            var statusCounts = chartData.status.map(function(d) { return parseInt(d.count); });
-            var statusColors = statusLabels.map(function(status) {
-                if (status === 'Delivered') return '#4caf50';
-                if (status === 'Delayed') return '#f44336';
-                return '#2196f3';
-            });
-            
-            var ctx3 = document.getElementById('statusChart').getContext('2d');
-            charts.status = new Chart(ctx3, {
-                type: 'doughnut',
-                data: {
-                    labels: statusLabels,
-                    datasets: [{
-                        data: statusCounts,
-                        backgroundColor: statusColors
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { 
-                        legend: { 
-                            labels: { color: 'white' },
-                            position: 'bottom'
-                        }
-                    }
-                }
-            });
-            
             // 4. Top Products Chart
             if (charts.products) charts.products.destroy();
             var productLabels = chartData.products.map(function(d) { 
@@ -1257,8 +1680,8 @@ try {
             });
             var productQuantities = chartData.products.map(function(d) { return parseInt(d.total_quantity); });
             
-            var ctx4 = document.getElementById('productsChart').getContext('2d');
-            charts.products = new Chart(ctx4, {
+            var ctx3 = document.getElementById('productsChart').getContext('2d');
+            charts.products = new Chart(ctx3, {
                 type: 'bar',
                 data: {
                     labels: productLabels,
@@ -1294,8 +1717,8 @@ try {
             var totalDisruptions = chartData.disruption.map(function(d) { return parseInt(d.total_disruptions); });
             var highImpact = chartData.disruption.map(function(d) { return parseInt(d.high_impact); });
             
-            var ctx5 = document.getElementById('disruptionChart').getContext('2d');
-            charts.disruption = new Chart(ctx5, {
+            var ctx4 = document.getElementById('disruptionChart').getContext('2d');
+            charts.disruption = new Chart(ctx4, {
                 type: 'line',
                 data: {
                     labels: disruptionLabels,
@@ -1430,7 +1853,6 @@ try {
                 charts: {
                     volume: <?php echo json_encode($volumeData) ?>,
                     onTimeRate: <?php echo json_encode($onTimeRateData) ?>,
-                    status: <?php echo json_encode($statusData) ?>,
                     products: <?php echo json_encode($productsData) ?>,
                     disruption: <?php echo json_encode($disruptionData) ?>
                 },

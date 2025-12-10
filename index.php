@@ -37,7 +37,8 @@ unset($_SESSION['login_error']);
     <meta name="viewport" content="width=device-width,initial-scale=1">
 </head>
 <body>
-    
+    <script src="../js/easter-egg.js"></script>
+
 <header class="site-header">
     <h1>Group Project ERP / SCM</h1>
 </header>
