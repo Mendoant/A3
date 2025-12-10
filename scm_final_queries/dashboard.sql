@@ -1,4 +1,4 @@
--- dashboard.php: Lines 13-27
+-- dashboard.php: Lines 15-33
 SELECT 
     de.EventID,
     de.EventDate,
