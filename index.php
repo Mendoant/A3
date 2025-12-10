@@ -44,7 +44,7 @@ unset($_SESSION['login_error']);
 <body>
     
 <header class="site-header">
-    <img src="images/logo.png" alt="Company Logo" class="site-logo">
+    
     <h1>Excalibur Analytics</h1>
 </header>
 
@@ -58,27 +58,33 @@ unset($_SESSION['login_error']);
         <?php endforeach; ?>
     </section>
 
-    <aside class="login-box" aria-labelledby="loginHeading">
-        <form id="loginForm" method="post" action="login.php" autocomplete="off">
-            <h2 id="loginHeading">Login</h2>
-            <label>
-                Username
-                <input type="text" name="username" required>
-            </label>
-            <label>
-                Password
-                <input type="password" name="password" required>
-            </label>
-            <button type="submit" name="action" value="login">login</button>
-            
-            <?php if ($login_error): ?>
-                <div class="login-feedback" id="loginFeedback" style="color: red; margin-top: 10px;">
-                    <?php echo htmlspecialchars($login_error) ?>
-                </div>
-            <?php endif; ?>
-            
-        </form>
-    </aside>
+    <div class="login-wrapper">
+        <img src="assets/images/logo.png" alt="Company Logo" class="login-side-logo">
+        
+        <aside class="login-box" aria-labelledby="loginHeading">
+            <form id="loginForm" method="post" action="login.php" autocomplete="off">
+                <h2 id="loginHeading">Login</h2>
+                <label>
+                    Username
+                    <input type="text" name="username" required>
+                </label>
+                <label>
+                    Password
+                    <input type="password" name="password" required>
+                </label>
+                <button type="submit" name="action" value="login">login</button>
+                
+                <?php if ($login_error): ?>
+                    <div class="login-feedback" id="loginFeedback" style="color: red; margin-top: 10px;">
+                        <?php echo htmlspecialchars($login_error) ?>
+                    </div>
+                <?php endif; ?>
+                
+            </form>
+        </aside>
+        
+        <img src="assets/images/logo.png" alt="Company Logo" class="login-side-logo">
+    </div>
 </main>
 
 <script src="assets/app.js"></script>
