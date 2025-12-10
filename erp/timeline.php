@@ -135,11 +135,14 @@ if (!empty($region)) {
     $catParams[':region'] = $region;
 }
 
-$categorySql .= " GROUP BY dc.CategoryName ORDER BY eventCount DESC LIMIT 5";
+$categorySql .= " GROUP BY dc.CategoryName ORDER BY eventCount DESC";
 
 $stmt2 = $pdo->prepare($categorySql);
 $stmt2->execute($catParams);
-$topCategories = $stmt2->fetchAll();
+$allCategoriesData = $stmt2->fetchAll();
+
+// Keep top 5 for the list display
+$topCategories = array_slice($allCategoriesData, 0, 5);
 
 // --- 6. AJAX RESPONSE ---
 if (isset($_GET['ajax'])) {
@@ -149,6 +152,7 @@ if (isset($_GET['ajax'])) {
         'data' => array(
             'timeline' => array_values($timelineData), // indexed array for chartjs
             'topCategories' => $topCategories, 
+            'allCategories' => $allCategoriesData, // all categories for pie chart
             'summary' => array(
                 'totalEvents' => $totalEvents, 
                 'totalPeriods' => $totalPeriods, 
@@ -364,7 +368,8 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             // initial data from PHP render
             var timelineData = <?= json_encode(array_values($timelineData)) ?>;
             var topCats = <?= json_encode($topCategories) ?>;
-            renderAll(timelineData, topCats);
+            var allCats = <?= json_encode($allCategoriesData) ?>;
+            renderAll(timelineData, topCats, allCats);
         }
         
         function load() {
@@ -414,7 +419,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                             document.getElementById('period-label').textContent = document.getElementById('group_by').value + 's analyzed';
                             
                             // redraw charts
-                            renderAll(d.timeline, d.topCategories);
+                            renderAll(d.timeline, d.topCategories, d.allCategories);
                         } else {
                             console.error('Server error:', r.message);
                         }
@@ -426,7 +431,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
             xhr.send();
         }
 
-        function renderAll(timelineData, topCats) {
+        function renderAll(timelineData, topCats, allCats) {
             // --- 1. Line Chart ---
             var labels = []; 
             var counts = [];
@@ -461,18 +466,28 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                 }
             });
             
-            // --- 2. Category List & Donut ---
+            // --- 2. Category List (Top 5) ---
             var catHtml = '';
-            var catLabels = []; 
-            var catCounts = [];
-            
             for (var i = 0; i < topCats.length; i++) {
                 var cat = topCats[i];
-                catLabels.push(cat.CategoryName);
-                catCounts.push(parseInt(cat.eventCount));
                 catHtml += '<div class="category-item"><span>' + (i + 1) + '. ' + esc(cat.CategoryName) + '</span><span>' + cat.eventCount + ' events</span></div>';
             }
             document.getElementById('categoryList').innerHTML = catHtml;
+            
+            // --- 3. Pie Chart (All Categories) ---
+            var catLabels = []; 
+            var catCounts = [];
+            
+            // Generate colors dynamically for all categories
+            var colors = [];
+            var baseColors = ['#CFB991', '#f44336', '#ff9800', '#4caf50', '#2196f3', '#9c27b0', '#e91e63', '#00bcd4', '#8bc34a', '#ffc107'];
+            
+            for (var i = 0; i < allCats.length; i++) {
+                var cat = allCats[i];
+                catLabels.push(cat.CategoryName);
+                catCounts.push(parseInt(cat.eventCount));
+                colors.push(baseColors[i % baseColors.length]);
+            }
             
             if (categoryChart) categoryChart.destroy();
             var ctx2 = document.getElementById('categoryChart').getContext('2d');
@@ -482,7 +497,7 @@ $allRegions = $pdo->query("SELECT DISTINCT ContinentName FROM Location ORDER BY 
                     labels: catLabels, 
                     datasets: [{ 
                         data: catCounts, 
-                        backgroundColor: ['#CFB991', '#f44336', '#ff9800', '#4caf50', '#2196f3'],
+                        backgroundColor: colors,
                         borderWidth: 0
                     }] 
                 },
