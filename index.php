@@ -44,7 +44,8 @@ unset($_SESSION['login_error']);
 <body>
     
 <header class="site-header">
-    <h1>Group Project ERP / SCM</h1>
+    <img src="images/logo.png" alt="Company Logo" class="site-logo">
+    <h1>Excalibur Analytics</h1>
 </header>
 
 <main class="container">
