@@ -1,0 +1,23 @@
+SELECT
+    l.ContinentName AS Region,
+    dc.CategoryName AS DisruptionType,
+    COUNT(ic.EventID) AS TotalImpacts,
+    SUM(CASE WHEN ic.ImpactLevel = 'High' THEN 1 ELSE 0 END) AS HighImpactCount,
+    SUM(CASE WHEN ic.ImpactLevel = 'Medium' THEN 1 ELSE 0 END) AS MediumImpactCount,
+    SUM(CASE WHEN ic.ImpactLevel = 'Low' THEN 1 ELSE 0 END) AS LowImpactCount
+FROM
+    Location l
+JOIN
+    Company c ON l.LocationID = c.LocationID
+JOIN
+    ImpactsCompany ic ON c.CompanyID = ic.AffectedCompanyID
+JOIN
+    DisruptionEvent de ON ic.EventID = de.EventID
+JOIN
+    DisruptionCategory dc ON de.CategoryID = dc.CategoryID
+GROUP BY
+    l.ContinentName,
+    dc.CategoryName
+ORDER BY
+    Region ASC,
+    TotalImpacts DESC;

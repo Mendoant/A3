@@ -1,0 +1,28 @@
+-- Step 1: Set the company ID you want to query and date range
+SET @company_id_selector = 1;
+SET @start_date = '2023-01-01';
+SET @end_date = '2023-12-31';
+
+
+-- Step 2: Run the query using the variable
+SELECT
+    c.CompanyName,
+    c.CompanyID,
+    DATE_FORMAT(de.EventDate, '%Y-%m-%d') AS DisruptionDate,
+    COUNT(de.EventID) AS DisruptionCount
+FROM
+    Company c
+JOIN
+    ImpactsCompany ic ON c.CompanyID = ic.AffectedCompanyID
+JOIN
+    DisruptionEvent de ON ic.EventID = de.EventID
+WHERE
+    c.CompanyID = @company_id_selector -- Use the variable here
+AND de.EventDate >= @start_date      -- Filter for events on or after the start date
+AND de.EventDate <= @end_date        -- Filter for events on or before the end date
+GROUP BY
+    c.CompanyID,
+    c.CompanyName,
+    DisruptionDate
+ORDER BY
+    DisruptionDate ASC;

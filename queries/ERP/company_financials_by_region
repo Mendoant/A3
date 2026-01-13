@@ -1,0 +1,61 @@
+WITH
+    -- CTE 1: Find the single most recent (Year, Quarter) in the database
+    MostRecentPeriod AS (
+        SELECT
+            RepYear,
+            Quarter
+        FROM
+            FinancialReport
+        ORDER BY
+            RepYear DESC,
+            Quarter DESC
+        LIMIT 1
+    ),
+    -- CTE 2: Get the specific HealthScore for EACH company,
+    -- but ONLY from the most recent period
+    CompanyMostRecentScore AS (
+        SELECT
+            fr.CompanyID,
+            fr.HealthScore AS CompanyMostRecentScore
+        FROM
+            FinancialReport fr
+            JOIN MostRecentPeriod mrp ON fr.RepYear = mrp.RepYear AND fr.Quarter = mrp.Quarter
+    ),
+    -- CTE 3: Calculate the average HealthScore for EACH region across ALL time
+    RegionAllTimeAverages AS (
+        SELECT
+            l.ContinentName AS Region,
+            ROUND(AVG(fr.HealthScore), 2) AS RegionAllTimeAvg
+        FROM
+            FinancialReport fr
+            JOIN Company c ON fr.CompanyID = c.CompanyID
+            JOIN Location l ON c.LocationID = l.LocationID
+        GROUP BY
+            l.ContinentName
+    ),
+    -- CTE 4: Calculate the average HealthScore for EACH individual company across ALL time
+    CompanyAllTimeAverages AS (
+        SELECT
+            CompanyID,
+            ROUND(AVG(HealthScore), 2) AS CompanyAllTimeAvg
+        FROM
+            FinancialReport
+        GROUP BY
+            CompanyID
+    )
+-- Final SELECT: Join all our CTEs with the main Company table
+SELECT
+    l.ContinentName AS Region,
+    c.CompanyName,
+    COALESCE(ca.CompanyAllTimeAvg, 0.00) AS CompanyAllTimeAvg,
+    COALESCE(cmrs.CompanyMostRecentScore, 0.00) AS CompanyMostRecentScore,
+    COALESCE(ra.RegionAllTimeAvg, 0.00) AS RegionAllTimeAvg
+FROM
+    Company c
+    JOIN Location l ON c.LocationID = l.LocationID
+    LEFT JOIN CompanyAllTimeAverages ca ON c.CompanyID = ca.CompanyID
+    LEFT JOIN RegionAllTimeAverages ra ON l.ContinentName = ra.Region
+    LEFT JOIN CompanyMostRecentScore cmrs ON c.CompanyID = cmrs.CompanyID
+ORDER BY
+    Region ASC,
+    CompanyMostRecentScore DESC; -- <-- This line has been changed
